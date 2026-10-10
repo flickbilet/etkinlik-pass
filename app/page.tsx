@@ -25,30 +25,46 @@ export default function Home() {
 
   const [timeLeft, setTimeLeft] = useState(60);
 
-  // Driver.js İnteraktif Rehber Başlatıcı
+  // Akıllı ve Dinamik Driver.js Rehber Başlatıcı
   const startTutorial = () => {
     // @ts-ignore
     if (typeof window !== 'undefined' && window.driver) {
       // @ts-ignore
       const driverObj = window.driver.js.driver({
         showProgress: true,
+        nextBtnText: 'Sonraki ➔',
         prevBtnText: '⬅ Geri',
         doneBtnText: 'Anladım, Harika! 👍',
-        showButtons: ['previous'], // Sonraki butonunu kaldırır, sadece Geri butonunu tutar
         allowClose: true,
         steps: [
           { 
             element: '#step-select-event', 
             popover: { 
               title: '1. Etkinlik Seçimi 🎬', 
-              description: 'Devam etmek için aşağıdaki listeden etkinliğine tıkla!',
+              description: 'Lütfen listeden kaydolmak istediğin etkinliğe tıkla!',
               side: "bottom",
               align: "center"
             },
             onHighlightStarted: (element: any) => {
-              element?.addEventListener('click', () => {
-                setTimeout(() => driverObj.moveNext(), 300);
-              }, { once: true });
+              element?.addEventListener('click', (e: Event) => {
+                const target = e.target as HTMLElement;
+                const card = target.closest('.relative');
+                
+                // Eğer tıklanan etkinlik pasif/kapalıysa uyarı ver ve adımda kal
+                if (card && card.classList.contains('cursor-not-allowed')) {
+                  driverObj.getConfig().popover = {
+                    title: '⚠️ Kontenjan Dolu!',
+                    description: 'Seçtiğiniz etkinliğin kayıtları kapalı. Lütfen kayıt oluşturabilmek için kontenjanı açık olan başka bir etkinlik seçin!',
+                    side: "bottom",
+                    align: "center"
+                  };
+                  driverObj.refresh();
+                  return;
+                }
+
+                // Aktif etkinliğe tıklandıysa sonraki adıma geç
+                setTimeout(() => driverObj.moveNext(), 400);
+              });
             }
           },
           { 
@@ -61,15 +77,15 @@ export default function Home() {
             },
             onHighlightStarted: (element: any) => {
               element?.addEventListener('click', () => {
-                setTimeout(() => driverObj.moveNext(), 300);
-              }, { once: true });
+                setTimeout(() => driverObj.moveNext(), 400);
+              });
             }
           },
           { 
             element: '#step-form-inputs', 
             popover: { 
               title: '3. Bilgilerini Gir & Doğrula ✉️', 
-              description: 'Bilgilerini doldurup 6 haneli doğrulama kodunu onayladıktan sonra bir sonraki adıma geçebilirsin.',
+              description: 'Bilgilerini doldurup e-postana gelen 6 haneli doğrulama kodunu onayladıktan sonra ilerle.',
               side: "top",
               align: "center"
             } 
@@ -84,8 +100,8 @@ export default function Home() {
             },
             onHighlightStarted: (element: any) => {
               element?.addEventListener('click', () => {
-                setTimeout(() => driverObj.moveNext(), 300);
-              }, { once: true });
+                setTimeout(() => driverObj.moveNext(), 400);
+              });
             }
           },
           { 
@@ -252,7 +268,7 @@ export default function Home() {
     } catch (err) { 
       setError("Bağlantı hatası oluştu."); 
       console.error(err);
-    } finally {
+    } fontally {
       setLoading(false); 
     }
   };
