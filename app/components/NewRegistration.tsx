@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { 
   User, Smartphone, Mail, School, Users, 
   MessageCircle, CheckCircle2, Loader2, Image as ImageIcon, ShieldCheck, KeyRound, Copy, CreditCard,
-  ChevronDown, AlertCircle 
+  ChevronDown, AlertCircle, Info, ArrowDownRight
 } from 'lucide-react';
 
 export default function NewRegistration({ 
@@ -43,7 +43,6 @@ export default function NewRegistration({
       try {
         const { data, error } = await supabase
           .from('etkinlik_ayarlari')
-          // is_registration_open sütunu sorguya eklendi
           .select('event_price, event_iban, event_ibanname, is_paid, is_registration_open')
           .eq('id', selectedEventId)
           .single();
@@ -124,7 +123,6 @@ export default function NewRegistration({
     e.preventDefault();
     setErrorMessage(null);
 
-    // Boşluk temizleme işlemi
     const cleanAdSoyad = formData.ad_soyad.trim();
     const cleanEmail = formData.email.trim();
     const cleanTelefon = formData.telefon.trim();
@@ -138,7 +136,6 @@ export default function NewRegistration({
 
     setLoading(true);
     try {
-      // --- Mükerrer Kayıt Kontrolü (Temizlenmiş veriyle) ---
       const { data: existingUser, error: checkError } = await supabase
         .from('katilimcilar')
         .select('onayli_mi')
@@ -159,7 +156,6 @@ export default function NewRegistration({
         return; 
       }
 
-      // Kayıt işlemini temizlenmiş (trim yapılmış) verilerle gerçekleştiriyoruz
       const { data: user, error: userError } = await supabase
         .from('katilimcilar')
         .insert([{
@@ -198,6 +194,13 @@ export default function NewRegistration({
     return ` (${s.slice(0, 3)}) ${s.slice(3, 6)} ${s.slice(6, 8)} ${s.slice(8, 10)}`;
   };
 
+  // İlerleme adımı hesaplama
+  const getStepNumber = () => {
+    if (waJoined) return 3;
+    if (emailVerified) return 2;
+    return 1;
+  };
+
   if (fetchingSettings) {
     return (
       <div className="flex items-center justify-center p-20">
@@ -228,6 +231,22 @@ export default function NewRegistration({
 
   return (
     <div className="bg-slate-900/60 backdrop-blur-2xl border border-white/10 p-6 rounded-[2.5rem] shadow-2xl animate-in fade-in duration-700">
+      
+      {/* İLERLEME ÇUBUĞU (PROGRESS BAR) */}
+      <div className="mb-6 bg-slate-950/40 p-2 rounded-2xl border border-white/5 flex items-center justify-between text-[11px] font-bold">
+        <div className={`flex-1 text-center py-2 rounded-xl transition-all ${getStepNumber() >= 1 ? 'bg-blue-600/30 text-blue-400 border border-blue-500/30' : 'text-slate-500'}`}>
+          1. Bilgiler
+        </div>
+        <span className="text-slate-600 px-1">→</span>
+        <div className={`flex-1 text-center py-2 rounded-xl transition-all ${getStepNumber() >= 2 ? 'bg-blue-600/30 text-blue-400 border border-blue-500/30' : 'text-slate-500'}`}>
+          2. E-posta
+        </div>
+        <span className="text-slate-600 px-1">→</span>
+        <div className={`flex-1 text-center py-2 rounded-xl transition-all ${getStepNumber() === 3 ? 'bg-emerald-500/30 text-emerald-400 border border-emerald-500/30' : 'text-slate-500'}`}>
+          3. Tamamlama
+        </div>
+      </div>
+
       <h2 className="text-2xl font-bold mb-6 flex items-center gap-2 tracking-tighter uppercase text-white">
         <CheckCircle2 className="text-blue-500" /> Etkinlik Kaydı
       </h2>
@@ -311,6 +330,34 @@ export default function NewRegistration({
           <InputItem icon={<User size={18}/>} placeholder="Ad Soyad" value={formData.ad_soyad} onChange={(v: any) => setFormData({...formData, ad_soyad: v})} />
           
           <div className="relative">
+            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 z-20"><Smartphone size={18}/></div>
+            <div className="absolute inset-0 pointer-events-none flex items-center pl-12 pr-4 text-white/20 font-mono tracking-wider text-sm">
+              <span className="opacity-0">{formatPhoneDisplay(formData.telefon).split('X')[0]}</span>
+              {formatPhoneDisplay(formData.telefon).includes('X') && (
+                <span>{formatPhoneDisplay(formData.telefon).slice(formatPhoneDisplay(formData.telefon).indexOf('X'))}</span>
+              )}
+            </div>
+
+            <input
+              required
+              type="tel"
+              value={formData.telefon}
+              onChange={(e) => {
+                const val = e.target.value.replace(/\D/g, '');
+                if (val.length <= 10 && (val.startsWith('5') || val === '')) {
+                  setFormData({...formData, telefon: val.startsWith('5') ? val : (val === '' ? '5' : '5' + val)});
+                }
+              }}
+              className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-blue-500/50 outline-none font-mono tracking-wider text-sm relative z-10"
+              style={{ color: 'white' }}
+            />
+          </div>
+
+          <InputItem icon={<School size={18}/>} placeholder="Okul / Bölüm" value={formData.okul} onChange={(v: any) => setFormData({...formData, okul: v})} />
+          <InputItem icon={<Users size={18}/>} placeholder="Referans (Varsa)" value={formData.referans} onChange={(v: any) => setFormData({...formData, referans: v})} />
+
+          {/* E-POSTA VE OTP DOĞRULAMA (WHATSAPP'IN HEMEN ÜSTÜNE TAŞINDI) */}
+          <div className="relative pt-1">
             <InputItem 
               icon={<Mail size={18}/>} 
               placeholder="E-posta" 
@@ -324,13 +371,13 @@ export default function NewRegistration({
                 type="button"
                 onClick={handleSendOTP}
                 disabled={verifyingEmail}
-                className="absolute right-2 top-1/2 -translate-y-1/2 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-2 px-3 rounded-xl transition-all disabled:opacity-30"
+                className="absolute right-2 top-[calc(50%+2px)] -translate-y-1/2 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-2 px-3 rounded-xl transition-all disabled:opacity-30"
               >
                 {verifyingEmail ? <Loader2 size={14} className="animate-spin" /> : (emailSent ? "TEKRAR GÖNDER" : "KOD GÖNDER")}
               </button>
             )}
             {emailVerified && (
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-500 flex items-center gap-1 font-bold text-[10px]">
+              <div className="absolute right-4 top-[calc(50%+2px)] -translate-y-1/2 text-emerald-500 flex items-center gap-1 font-bold text-[10px]">
                 <CheckCircle2 size={16} /> DOĞRULANDI
               </div>
             )}
@@ -358,33 +405,6 @@ export default function NewRegistration({
               </button>
             </div>
           )}
-          
-          <div className="relative">
-            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 z-20"><Smartphone size={18}/></div>
-            <div className="absolute inset-0 pointer-events-none flex items-center pl-12 pr-4 text-white/20 font-mono tracking-wider text-sm">
-              <span className="opacity-0">{formatPhoneDisplay(formData.telefon).split('X')[0]}</span>
-              {formatPhoneDisplay(formData.telefon).includes('X') && (
-                <span>{formatPhoneDisplay(formData.telefon).slice(formatPhoneDisplay(formData.telefon).indexOf('X'))}</span>
-              )}
-            </div>
-
-            <input
-              required
-              type="tel"
-              value={formData.telefon}
-              onChange={(e) => {
-                const val = e.target.value.replace(/\D/g, '');
-                if (val.length <= 10 && (val.startsWith('5') || val === '')) {
-                  setFormData({...formData, telefon: val.startsWith('5') ? val : (val === '' ? '5' : '5' + val)});
-                }
-              }}
-              className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-blue-500/50 outline-none font-mono tracking-wider text-sm relative z-10"
-              style={{ color: 'white' }}
-            />
-          </div>
-
-          <InputItem icon={<School size={18}/>} placeholder="Okul / Bölüm" value={formData.okul} onChange={(v: any) => setFormData({...formData, okul: v})} />
-          <InputItem icon={<Users size={18}/>} placeholder="Referans (Varsa)" value={formData.referans} onChange={(v: any) => setFormData({...formData, referans: v})} />
         </div>
 
         {showPaymentInfo && (
@@ -404,6 +424,17 @@ export default function NewRegistration({
                 Dekont verilerinize yalnızca yönetim erişebilir.
               </p>
             </div>
+          </div>
+        )}
+
+        {/* E-POSTA DOĞRULANDIĞINDA TAM WHATSAPP BUTONUNUN ÜSTÜNDE ÇIKAN UYARI */}
+        {emailVerified && (
+          <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-2xl flex items-center gap-3 text-amber-200 text-xs animate-in zoom-in duration-300">
+            <Info size={20} className="text-amber-400 shrink-0" />
+            <span className="font-semibold leading-relaxed">
+              Gruba katıldıktan sonra başvurunuzu tamamlamak için aşağıdaki <strong className="text-white underline">"KAYDI TAMAMLA"</strong> butonuna basmayı unutmayın!
+            </span>
+            <ArrowDownRight size={18} className="text-amber-400 animate-bounce shrink-0 ml-auto" />
           </div>
         )}
 
@@ -431,7 +462,11 @@ export default function NewRegistration({
         <button
           disabled={loading || !waJoined || countdown > 0 || !emailVerified}
           type="submit"
-          className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-20 disabled:grayscale text-white font-bold py-5 rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2"
+          className={`w-full font-bold py-5 rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2 text-white ${
+            waJoined && countdown === 0 
+              ? 'bg-blue-600 hover:bg-blue-500 ring-4 ring-blue-500/30 animate-pulse' 
+              : 'bg-blue-600 disabled:opacity-20 disabled:grayscale'
+          }`}
         >
           {loading ? <Loader2 className="animate-spin" /> : "KAYDI TAMAMLA"}
         </button>
