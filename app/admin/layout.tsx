@@ -7,7 +7,7 @@ import {
   Users, Lock, Plus, Camera, ShieldCheck, 
   Settings2, LayoutGrid, X, Power, Film, Theater, Trophy, 
   Calendar, MapPin, Loader2, Save, Armchair, Link2,
-  CreditCard, Banknote, User, ClipboardList
+  CreditCard, Banknote, User, ClipboardList, Sparkles
 } from 'lucide-react';
 
 const AdminContext = createContext<any>(null);
@@ -82,7 +82,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         event_price: slot.event_price,
         event_iban: slot.event_iban,
         event_ibanname: slot.event_ibanname,
-        is_registration_open: slot.is_registration_open // YENİLİK: Kayıt durumu veritabanına gönderiliyor
+        is_registration_open: slot.is_registration_open, // YENİLİK: Kayıt durumu veritabanına gönderiliyor
+        is_featured: slot.is_featured // YENİLİK: Özel Etkinlik durumu veritabanına gönderiliyor
       })
       .eq('id', slot.id);
 
@@ -331,7 +332,31 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
                   {eventSlots.map((slot) => (
-                    <div key={slot.id} className={`p-5 sm:p-6 rounded-[2rem] border transition-all duration-500 ${slot.is_active ? 'bg-slate-900/40 border-blue-500/30' : 'bg-slate-900/10 border-white/5 opacity-60'}`}>
+                    <div key={slot.id} className={`p-5 sm:p-6 rounded-[2rem] border transition-all duration-500 ${slot.is_active ? (slot.is_featured ? 'bg-gradient-to-b from-amber-500/10 via-slate-900/60 to-slate-900/40 border-amber-500/50 shadow-[0_0_25px_rgba(245,158,11,0.15)]' : 'bg-slate-900/40 border-blue-500/30') : 'bg-slate-900/10 border-white/5 opacity-60'}`}>
+                      
+                      {/* ÖZEL ETKİNLİK BUTONU */}
+                      <div className="mb-4">
+                        <button
+                          type="button"
+                          onClick={() => updateLocalSlot(slot.id, 'is_featured', !slot.is_featured)}
+                          className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border ${
+                            slot.is_featured 
+                              ? 'bg-amber-500/20 border-amber-500/50 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]' 
+                              : 'bg-slate-950 border-white/5 text-slate-500 hover:text-slate-300'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <Sparkles size={14} className={slot.is_featured ? 'text-amber-400 animate-pulse' : 'text-slate-600'} />
+                            ÖZEL ETKİNLİK VURGUSU
+                          </span>
+                          <span className={`px-2.5 py-1 rounded-lg text-[8px] font-black ${
+                            slot.is_featured ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            {slot.is_featured ? 'EVET (ÖNE ÇIKAN)' : 'HAYIR (NORMAL)'}
+                          </span>
+                        </button>
+                      </div>
+
                       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
                         <span className="text-[10px] font-black bg-blue-600/20 text-blue-500 px-3 py-1 rounded-lg">SLOT #{slot.slot_id}</span>
                         <div className="flex flex-wrap items-center gap-2">
