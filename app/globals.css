@@ -29,10 +29,10 @@ body {
    DRIVER.JS ÖZEL MİDAR & KOYU TEMA STİLLERİ (Flick Bilet Tasarımıyla Uyumlu)
    ========================================================================== */
 
-/* Arka plan karartma katmanı */
+/* Arka plan karartma katmanı - Şeffaf ve Blursuz */
 .driver-overlay {
-  background-color: rgba(2, 6, 23, 0.85) !important;
-  backdrop-filter: blur(6px) !important;
+  background-color: rgba(2, 6, 23, 0.5) !important;
+  backdrop-filter: none !important;
 }
 
 /* Öne çıkarılan (parlatılan) elemanın etrafındaki çerçeve */
@@ -47,7 +47,7 @@ body {
 .driver-popover {
   background: rgba(15, 23, 42, 0.95) !important;
   border: 1px solid rgba(255, 255, 255, 0.15) !important;
-  backdrop-filter: blur(20px) !important;
+  backdrop-filter: blur(12px) !important;
   color: #f8fafc !important;
   border-radius: 1.75rem !important;
   padding: 1.25rem !important;
@@ -109,7 +109,7 @@ body {
   color: #ffffff !important;
 }
 
-/* İleri Butonu (Sadece 'Tamam/Kapat' Adımında Görünecek) */
+/* Kapat/Tamam Butonu */
 .driver-popover-next-btn {
   background: #2563eb !important;
   color: #ffffff !important;
