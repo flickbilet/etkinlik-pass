@@ -330,6 +330,34 @@ export default function NewRegistration({
           <InputItem icon={<User size={18}/>} placeholder="Ad Soyad" value={formData.ad_soyad} onChange={(v: any) => setFormData({...formData, ad_soyad: v})} />
           
           <div className="relative">
+            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 z-20"><Smartphone size={18}/></div>
+            <div className="absolute inset-0 pointer-events-none flex items-center pl-12 pr-4 text-white/20 font-mono tracking-wider text-sm">
+              <span className="opacity-0">{formatPhoneDisplay(formData.telefon).split('X')[0]}</span>
+              {formatPhoneDisplay(formData.telefon).includes('X') && (
+                <span>{formatPhoneDisplay(formData.telefon).slice(formatPhoneDisplay(formData.telefon).indexOf('X'))}</span>
+              )}
+            </div>
+
+            <input
+              required
+              type="tel"
+              value={formData.telefon}
+              onChange={(e) => {
+                const val = e.target.value.replace(/\D/g, '');
+                if (val.length <= 10 && (val.startsWith('5') || val === '')) {
+                  setFormData({...formData, telefon: val.startsWith('5') ? val : (val === '' ? '5' : '5' + val)});
+                }
+              }}
+              className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-blue-500/50 outline-none font-mono tracking-wider text-sm relative z-10"
+              style={{ color: 'white' }}
+            />
+          </div>
+
+          <InputItem icon={<School size={18}/>} placeholder="Okul / Bölüm" value={formData.okul} onChange={(v: any) => setFormData({...formData, okul: v})} />
+          <InputItem icon={<Users size={18}/>} placeholder="Referans (Varsa)" value={formData.referans} onChange={(v: any) => setFormData({...formData, referans: v})} />
+
+          {/* E-POSTA VE OTP DOĞRULAMA (WHATSAPP'IN HEMEN ÜSTÜNE TAŞINDI) */}
+          <div className="relative pt-1">
             <InputItem 
               icon={<Mail size={18}/>} 
               placeholder="E-posta" 
@@ -343,13 +371,13 @@ export default function NewRegistration({
                 type="button"
                 onClick={handleSendOTP}
                 disabled={verifyingEmail}
-                className="absolute right-2 top-1/2 -translate-y-1/2 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-2 px-3 rounded-xl transition-all disabled:opacity-30"
+                className="absolute right-2 top-[calc(50%+2px)] -translate-y-1/2 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-2 px-3 rounded-xl transition-all disabled:opacity-30"
               >
                 {verifyingEmail ? <Loader2 size={14} className="animate-spin" /> : (emailSent ? "TEKRAR GÖNDER" : "KOD GÖNDER")}
               </button>
             )}
             {emailVerified && (
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-500 flex items-center gap-1 font-bold text-[10px]">
+              <div className="absolute right-4 top-[calc(50%+2px)] -translate-y-1/2 text-emerald-500 flex items-center gap-1 font-bold text-[10px]">
                 <CheckCircle2 size={16} /> DOĞRULANDI
               </div>
             )}
@@ -377,33 +405,6 @@ export default function NewRegistration({
               </button>
             </div>
           )}
-          
-          <div className="relative">
-            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 z-20"><Smartphone size={18}/></div>
-            <div className="absolute inset-0 pointer-events-none flex items-center pl-12 pr-4 text-white/20 font-mono tracking-wider text-sm">
-              <span className="opacity-0">{formatPhoneDisplay(formData.telefon).split('X')[0]}</span>
-              {formatPhoneDisplay(formData.telefon).includes('X') && (
-                <span>{formatPhoneDisplay(formData.telefon).slice(formatPhoneDisplay(formData.telefon).indexOf('X'))}</span>
-              )}
-            </div>
-
-            <input
-              required
-              type="tel"
-              value={formData.telefon}
-              onChange={(e) => {
-                const val = e.target.value.replace(/\D/g, '');
-                if (val.length <= 10 && (val.startsWith('5') || val === '')) {
-                  setFormData({...formData, telefon: val.startsWith('5') ? val : (val === '' ? '5' : '5' + val)});
-                }
-              }}
-              className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-blue-500/50 outline-none font-mono tracking-wider text-sm relative z-10"
-              style={{ color: 'white' }}
-            />
-          </div>
-
-          <InputItem icon={<School size={18}/>} placeholder="Okul / Bölüm" value={formData.okul} onChange={(v: any) => setFormData({...formData, okul: v})} />
-          <InputItem icon={<Users size={18}/>} placeholder="Referans (Varsa)" value={formData.referans} onChange={(v: any) => setFormData({...formData, referans: v})} />
         </div>
 
         {showPaymentInfo && (
@@ -423,6 +424,17 @@ export default function NewRegistration({
                 Dekont verilerinize yalnızca yönetim erişebilir.
               </p>
             </div>
+          </div>
+        )}
+
+        {/* E-POSTA DOĞRULANDIĞINDA TAM WHATSAPP BUTONUNUN ÜSTÜNDE ÇIKAN UYARI */}
+        {emailVerified && (
+          <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-2xl flex items-center gap-3 text-amber-200 text-xs animate-in zoom-in duration-300">
+            <Info size={20} className="text-amber-400 shrink-0" />
+            <span className="font-semibold leading-relaxed">
+              Gruba katıldıktan sonra başvurunuzu tamamlamak için aşağıdaki <strong className="text-white underline">"KAYDI TAMAMLA"</strong> butonuna basmayı unutmayın!
+            </span>
+            <ArrowDownRight size={18} className="text-amber-400 animate-bounce shrink-0 ml-auto" />
           </div>
         )}
 
@@ -446,17 +458,6 @@ export default function NewRegistration({
           <MessageCircle size={20} />
           {waJoined ? (countdown > 0 ? `DOĞRULANIYOR (${countdown})` : "GRUBA KATILINDI") : "WHATSAPP GRUBUNA KATIL"}
         </a>
-
-        {/* E-POSTA DOĞRULANDIĞI ANDA BELİREN AKILLI UYARI İKAZI */}
-        {emailVerified && (
-          <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-2xl flex items-center gap-3 text-amber-200 text-xs animate-in zoom-in duration-300">
-            <Info size={20} className="text-amber-400 shrink-0" />
-            <span className="font-semibold leading-relaxed">
-              Gruba katıldıktan sonra başvurunuzu tamamlamak için aşağıdaki <strong className="text-white underline">"KAYDI TAMAMLA"</strong> butonuna basmayı unutmayın!
-            </span>
-            <ArrowDownRight size={18} className="text-amber-400 animate-bounce shrink-0 ml-auto" />
-          </div>
-        )}
 
         <button
           disabled={loading || !waJoined || countdown > 0 || !emailVerified}
