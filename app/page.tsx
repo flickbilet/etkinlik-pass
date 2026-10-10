@@ -32,33 +32,44 @@ export default function Home() {
       // @ts-ignore
       const driverObj = window.driver.js.driver({
         showProgress: true,
-        nextBtnText: 'Sonraki ➔',
         prevBtnText: '⬅ Geri',
         doneBtnText: 'Anladım, Harika! 👍',
+        showButtons: ['previous'], // Sonraki butonunu kaldırır, sadece Geri butonunu tutar
+        allowClose: true,
         steps: [
           { 
             element: '#step-select-event', 
             popover: { 
               title: '1. Etkinlik Seçimi 🎬', 
-              description: 'Önce Bilet almak veya kayıt olmak istediğin etkinliği seç!',
+              description: 'Devam etmek için aşağıdaki listeden etkinliğine tıkla!',
               side: "bottom",
               align: "center"
-            } 
+            },
+            onHighlightStarted: (element: any) => {
+              element?.addEventListener('click', () => {
+                setTimeout(() => driverObj.moveNext(), 300);
+              }, { once: true });
+            }
           },
           { 
             element: '#step-new-reg-btn', 
             popover: { 
               title: '2. Kayıt Oluşturma 📝', 
-              description: 'Eğer henüz sisteme kaydolmadıysan "Yeni Kayıt Oluştur" butonuna basarak formu aç.',
+              description: 'Eğer henüz kaydolmadıysan "Yeni Kayıt Oluştur" butonuna basarak formu aç.',
               side: "top",
               align: "center"
-            } 
+            },
+            onHighlightStarted: (element: any) => {
+              element?.addEventListener('click', () => {
+                setTimeout(() => driverObj.moveNext(), 300);
+              }, { once: true });
+            }
           },
           { 
             element: '#step-form-inputs', 
             popover: { 
               title: '3. Bilgilerini Gir & Doğrula ✉️', 
-              description: 'Bilgilerini yaz, e-postana gelen 6 haneli doğrulama kodunu girip doğru şekilde onayla.',
+              description: 'Bilgilerini doldurup 6 haneli doğrulama kodunu onayladıktan sonra bir sonraki adıma geçebilirsin.',
               side: "top",
               align: "center"
             } 
@@ -67,16 +78,21 @@ export default function Home() {
             element: '#step-whatsapp-section', 
             popover: { 
               title: '4. WhatsApp & Kaydı Tamamla 💬', 
-              description: 'WhatsApp grubuna katıl! Ancak unutma, siteye geri dönüp mutlaka "KAYDI TAMAMLA" butonuna basmalısın!',
+              description: 'WhatsApp grubuna katıldıktan sonra "KAYDI TAMAMLA" butonuna basarak başvurunu bitir!',
               side: "top",
               align: "center"
-            } 
+            },
+            onHighlightStarted: (element: any) => {
+              element?.addEventListener('click', () => {
+                setTimeout(() => driverObj.moveNext(), 300);
+              }, { once: true });
+            }
           },
           { 
             element: '#step-get-ticket', 
             popover: { 
               title: '5. Biletini Hazırla 🎟️', 
-              description: 'Kaydın onaylandıktan sonra tekrar siteye gel, etkinliği ve bilgilerini girerek QR kodlu biletini al!',
+              description: 'Kaydın onaylandıktan sonra tekrar siteye gel, etkinliğini ve bilgilerini girerek QR kodlu biletini al!',
               side: "center",
               align: "center"
             } 
