@@ -59,50 +59,68 @@ export default function RegistrationForm({
             {loading ? (
               <div className="flex justify-center p-12"><Loader2 className="animate-spin text-blue-500" /></div>
             ) : (
-              eventSlots.map((event) => (
-                <div
-                  key={event.id}
-                  onClick={() => { if (event.is_active) { setSelectedEvent(event); setStep(1); } }}
-                  className={`relative overflow-hidden rounded-[2rem] border transition-all duration-500 
-                    ${event.is_active 
-                      ? 'bg-slate-900/60 border-white/5 cursor-pointer hover:border-blue-500/50 hover:scale-[1.02] active:scale-[0.98]' 
-                      : 'bg-slate-900/10 border-white/5 cursor-not-allowed'}`}
-                >
-                  {!event.is_active && (
-                    <div className="absolute inset-0 z-20 backdrop-blur-sm bg-[#020617]/40 flex items-center justify-center">
-                      <div className="flex flex-col items-center gap-2 opacity-40">
-                        <HelpCircle size={40} className="text-slate-500" />
-                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">YAKINDA</span>
-                      </div>
-                    </div>
-                  )}
+              eventSlots.map((event) => {
+                const isFeatured = event.is_featured && event.is_active;
 
-                  <div className={`p-6 flex items-center justify-between ${!event.is_active ? 'grayscale' : ''}`}>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-blue-500">{getEventIcon(event.event_type)}</span>
-                        <span className="text-[9px] font-bold uppercase tracking-widest text-slate-500">
-                          {event.is_active ? event.event_type : 'BELİRSİZ'}
-                        </span>
-                      </div>
-                      <h4 className="text-xl font-black text-white">{event.event_name}</h4>
-                      <div className="flex gap-4 pt-1">
-                        <div className="flex items-center gap-1.5 text-slate-500 text-[10px] font-medium uppercase">
-                          <CalendarDays size={12} /> {event.event_date}
+                return (
+                  <div
+                    key={event.id}
+                    onClick={() => { if (event.is_active) { setSelectedEvent(event); setStep(1); } }}
+                    className={`relative overflow-hidden rounded-[2rem] border transition-all duration-500 
+                      ${event.is_active 
+                        ? isFeatured
+                          ? 'bg-gradient-to-br from-amber-500/15 via-slate-900/90 to-slate-900/80 border-amber-500/60 shadow-[0_0_25px_rgba(245,158,11,0.2)] cursor-pointer hover:border-amber-400 hover:shadow-[0_0_35px_rgba(245,158,11,0.35)] hover:scale-[1.02] active:scale-[0.98]'
+                          : 'bg-slate-900/60 border-white/5 cursor-pointer hover:border-blue-500/50 hover:scale-[1.02] active:scale-[0.98]' 
+                        : 'bg-slate-900/10 border-white/5 cursor-not-allowed'}`}
+                  >
+                    {/* ÖZEL ETKİNLİK ROZETİ */}
+                    {isFeatured && (
+                      <div className="absolute top-0 right-0 z-10">
+                        <div className="bg-gradient-to-l from-amber-500 to-amber-600 text-slate-950 font-black text-[8px] uppercase tracking-widest px-3 py-1 rounded-bl-2xl flex items-center gap-1 shadow-lg">
+                          <Sparkles size={10} className="animate-spin" style={{ animationDuration: '4s' }} />
+                          <span>ÖZEL ETKİNLİK</span>
                         </div>
-                        <div className="flex items-center gap-1.5 text-slate-500 text-[10px] font-medium uppercase">
-                          <MapPin size={12} /> {event.event_location}
-                        </div>
-                      </div>
-                    </div>
-                    {event.is_active && (
-                      <div className="bg-blue-600/10 text-blue-500 p-3 rounded-2xl">
-                        <ChevronRight size={20} />
                       </div>
                     )}
+
+                    {!event.is_active && (
+                      <div className="absolute inset-0 z-20 backdrop-blur-sm bg-[#020617]/40 flex items-center justify-center">
+                        <div className="flex flex-col items-center gap-2 opacity-40">
+                          <HelpCircle size={40} className="text-slate-500" />
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">YAKINDA</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className={`p-6 flex items-center justify-between ${!event.is_active ? 'grayscale' : ''}`}>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className={isFeatured ? 'text-amber-400' : 'text-blue-500'}>
+                            {getEventIcon(event.event_type)}
+                          </span>
+                          <span className={`text-[9px] font-bold uppercase tracking-widest ${isFeatured ? 'text-amber-400/90' : 'text-slate-500'}`}>
+                            {event.is_active ? event.event_type : 'BELİRSİZ'}
+                          </span>
+                        </div>
+                        <h4 className="text-xl font-black text-white">{event.event_name}</h4>
+                        <div className="flex gap-4 pt-1">
+                          <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase ${isFeatured ? 'text-amber-200/70' : 'text-slate-500'}`}>
+                            <CalendarDays size={12} /> {event.event_date}
+                          </div>
+                          <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase ${isFeatured ? 'text-amber-200/70' : 'text-slate-500'}`}>
+                            <MapPin size={12} /> {event.event_location}
+                          </div>
+                        </div>
+                      </div>
+                      {event.is_active && (
+                        <div className={isFeatured ? 'bg-amber-500/20 text-amber-400 p-3 rounded-2xl border border-amber-500/30' : 'bg-blue-600/10 text-blue-500 p-3 rounded-2xl'}>
+                          <ChevronRight size={20} />
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
