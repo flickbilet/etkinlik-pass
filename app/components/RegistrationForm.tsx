@@ -109,7 +109,7 @@ export default function RegistrationForm({
       )}
 
       {step === 1 && (
-        <div className="view-transition max-w-md mx-auto">
+        <div id="step-form-inputs" className="view-transition max-w-md mx-auto">
           <button onClick={() => setStep(0)} className="flex items-center gap-2 text-slate-500 font-bold text-[10px] uppercase tracking-widest mb-6 hover:text-white transition-colors">
             <ArrowLeft size={14} /> ETKİNLİKLERE DÖN
           </button>
