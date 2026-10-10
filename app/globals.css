@@ -24,3 +24,112 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ==========================================================================
+   DRIVER.JS ÖZEL MİDAR & KOYU TEMA STİLLERİ (Flick Bilet Tasarımıyla Uyumlu)
+   ========================================================================== */
+
+/* Arka plan karartma katmanı */
+.driver-overlay {
+  background-color: rgba(2, 6, 23, 0.85) !important;
+  backdrop-filter: blur(6px) !important;
+}
+
+/* Öne çıkarılan (parlatılan) elemanın etrafındaki çerçeve */
+.driver-active-element {
+  outline: 2px solid #3b82f6 !important;
+  outline-offset: 4px !important;
+  box-shadow: 0 0 25px rgba(59, 130, 246, 0.5) !important;
+  border-radius: 1.5rem !important;
+}
+
+/* Rehber Pop-up Kutusu */
+.driver-popover {
+  background: rgba(15, 23, 42, 0.95) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  backdrop-filter: blur(20px) !important;
+  color: #f8fafc !important;
+  border-radius: 1.75rem !important;
+  padding: 1.25rem !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 20px rgba(59, 130, 246, 0.2) !important;
+  font-family: inherit !important;
+  max-width: 320px !important;
+}
+
+/* Başlık */
+.driver-popover-title {
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  font-size: 1.05rem !important;
+  letter-spacing: -0.02em !important;
+  margin-bottom: 0.5rem !important;
+  text-transform: uppercase !important;
+}
+
+/* Açıklama Metni */
+.driver-popover-description {
+  color: #94a3b8 !important;
+  font-size: 0.825rem !important;
+  line-height: 1.5 !important;
+  font-weight: 500 !important;
+}
+
+/* Alt Kısım ve Butonlar Alanı */
+.driver-popover-footer {
+  margin-top: 1rem !important;
+  padding-top: 0.75rem !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+
+/* Adım Göstergesi (Örn: 1/5) */
+.driver-popover-progress-text {
+  color: #3b82f6 !important;
+  font-size: 0.75rem !important;
+  font-weight: 800 !important;
+}
+
+/* Geri Butonu */
+.driver-popover-prev-btn {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #cbd5e1 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  text-shadow: none !important;
+  border-radius: 0.85rem !important;
+  padding: 0.4rem 0.85rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 700 !important;
+  transition: all 0.2s ease !important;
+}
+
+.driver-popover-prev-btn:hover {
+  background: rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+}
+
+/* İleri Butonu (Sadece 'Tamam/Kapat' Adımında Görünecek) */
+.driver-popover-next-btn {
+  background: #2563eb !important;
+  color: #ffffff !important;
+  border: none !important;
+  text-shadow: none !important;
+  border-radius: 0.85rem !important;
+  padding: 0.4rem 0.85rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 800 !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4) !important;
+  transition: all 0.2s ease !important;
+}
+
+.driver-popover-next-btn:hover {
+  background: #1d4ed8 !important;
+  transform: translateY(-1px) !important;
+}
+
+/* Pop-up Ok İşareti (Arrow) */
+.driver-popover-arrow-side-top { border-top-color: rgba(15, 23, 42, 0.95) !important; }
+.driver-popover-arrow-side-bottom { border-bottom-color: rgba(15, 23, 42, 0.95) !important; }
+.driver-popover-arrow-side-left { border-left-color: rgba(15, 23, 42, 0.95) !important; }
+.driver-popover-arrow-side-right { border-right-color: rgba(15, 23, 42, 0.95) !important; }
