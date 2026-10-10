@@ -338,21 +338,12 @@ export default function Home() {
       <header className="w-full max-w-2xl py-8 mb-2 text-center z-50 flex flex-col items-center justify-center">
         <div className="space-y-1">
           <h2 className="text-blue-500 font-bold text-[10px] tracking-[0.3em] uppercase italic">
-            ANKARA MEDIPOL SINEMA VE TIYATRO TOPLULUGU
+            ANKARA MEDIPOL SINEMA VE TIYATRO TOPLUGU
           </h2>
           <h1 className="text-3xl font-black tracking-tighter flex items-center justify-center gap-2 text-white">
             FLICK <span className="text-white">BILET</span>
           </h1>
         </div>
-
-        {/* NASIL KULLANILIR? REHBER BUTONU */}
-        <button
-          type="button"
-          onClick={startTutorial}
-          className="mt-4 inline-flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 px-4 py-2 rounded-2xl text-xs font-bold transition-all shadow-lg backdrop-blur-md active:scale-95 cursor-pointer"
-        >
-          <HelpCircle size={15} className="text-amber-400" /> Nasıl Kullanılır? (Rehber)
-        </button>
       </header>
 
       <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none select-none">
@@ -417,6 +408,17 @@ export default function Home() {
                     </button>
                   </div>
                 )}
+
+                {/* SADE VE MAT NASIL KULLANILIR BUTONU - ETKİNLİK SLOTLARININ ALTINDA */}
+                <div className="pt-2 text-center">
+                  <button
+                    type="button"
+                    onClick={startTutorial}
+                    className="inline-flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/50 text-slate-400 hover:text-slate-200 hover:bg-slate-800 px-3.5 py-1.5 rounded-xl text-[11px] font-medium transition-all active:scale-95 cursor-pointer"
+                  >
+                    <HelpCircle size={13} className="text-slate-400" /> Nasıl Kullanılır?
+                  </button>
+                </div>
               </div>
             )}
 
