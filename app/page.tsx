@@ -268,7 +268,7 @@ export default function Home() {
     } catch (err) { 
       setError("Bağlantı hatası oluştu."); 
       console.error(err);
-    } fontally {
+    } finally {
       setLoading(false); 
     }
   };
