@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { 
   User, Smartphone, Mail, School, Users, 
   MessageCircle, CheckCircle2, Loader2, Image as ImageIcon, ShieldCheck, KeyRound, Copy, CreditCard,
-  ChevronDown, AlertCircle, Info, ArrowRight 
+  ChevronDown, AlertCircle, Info, ArrowDownRight
 } from 'lucide-react';
 
 export default function NewRegistration({ 
@@ -68,13 +68,12 @@ export default function NewRegistration({
   }, [countdown]);
 
   const handleSendOTP = async () => {
-    const cleanEmail = formData.email.trim();
-    if (!cleanEmail.includes('@')) return setErrorMessage("Lütfen geçerli bir e-posta giriniz!");
+    if (!formData.email.includes('@')) return setErrorMessage("Lütfen geçerli bir e-posta giriniz!");
     setVerifyingEmail(true);
     setErrorMessage(null);
     try {
       const { error } = await supabase.auth.signInWithOtp({
-        email: cleanEmail,
+        email: formData.email,
         options: { shouldCreateUser: true }
       });
       if (error) throw error;
@@ -87,21 +86,19 @@ export default function NewRegistration({
   };
 
   const handleVerifyOTP = async () => {
-    // Kodu boşluklardan arındırarak kontrole alıyoruz
-    const cleanOtp = otpCode.replace(/\s+/g, '').toUpperCase();
-    if (cleanOtp.length < 6) return setErrorMessage("Lütfen 6 haneli kodu giriniz!");
+    if (otpCode.length < 6) return setErrorMessage("Lütfen 6 haneli kodu giriniz!");
     setVerifyingEmail(true);
     try {
       const { error } = await supabase.auth.verifyOtp({
-        email: formData.email.trim(),
-        token: cleanOtp,
+        email: formData.email,
+        token: otpCode,
         type: 'magiclink'
       });
       if (error) throw error;
       setEmailVerified(true);
       setErrorMessage(null);
     } catch (error: any) {
-      setErrorMessage("Kod hatalı veya süresi dolmuş! Kopyalarken ekstra boşluk kalmadığından emin olun.");
+      setErrorMessage("Kod hatalı veya süresi dolmuş!");
     } finally {
       setVerifyingEmail(false);
     }
@@ -131,7 +128,7 @@ export default function NewRegistration({
     const cleanTelefon = formData.telefon.trim();
 
     if (!emailVerified) return setErrorMessage("Lütfen önce e-posta adresinizi doğrulayın!");
-    if (!waJoined || countdown > 0) return setErrorMessage("Lütfen önce WhatsApp grubuna katılın ve sayacın bitmesini bekleyin!");
+    if (!waJoined || countdown > 0) return setErrorMessage("Lütfen önce WhatsApp grubuna katılın!");
     if (cleanTelefon.length !== 10) return setErrorMessage("Telefon numarası 10 hane olmalıdır!");
     
     const isPaid = eventSettings?.is_paid === true || String(eventSettings?.is_paid) === "true";
@@ -151,9 +148,9 @@ export default function NewRegistration({
 
       if (existingUser) {
         if (existingUser.onayli_mi === false) {
-          setErrorMessage("Böyle bir kayıt zaten var, onay bekliyor.");
+          setErrorMessage("böyle bir kayıt zaten var, onay bekliyor.");
         } else {
-          setErrorMessage("Böyle bir kayıt var. Biletinizi ana sayfadan alabilirsiniz.");
+          setErrorMessage("böyle bir kayıt var. biletinizi alabilirsiniz");
         }
         setLoading(false);
         return; 
@@ -197,6 +194,13 @@ export default function NewRegistration({
     return ` (${s.slice(0, 3)}) ${s.slice(3, 6)} ${s.slice(6, 8)} ${s.slice(8, 10)}`;
   };
 
+  // İlerleme adımı hesaplama
+  const getStepNumber = () => {
+    if (waJoined) return 3;
+    if (emailVerified) return 2;
+    return 1;
+  };
+
   if (fetchingSettings) {
     return (
       <div className="flex items-center justify-center p-20">
@@ -227,13 +231,29 @@ export default function NewRegistration({
 
   return (
     <div className="bg-slate-900/60 backdrop-blur-2xl border border-white/10 p-6 rounded-[2.5rem] shadow-2xl animate-in fade-in duration-700">
+      
+      {/* İLERLEME ÇUBUĞU (PROGRESS BAR) */}
+      <div className="mb-6 bg-slate-950/40 p-2 rounded-2xl border border-white/5 flex items-center justify-between text-[11px] font-bold">
+        <div className={`flex-1 text-center py-2 rounded-xl transition-all ${getStepNumber() >= 1 ? 'bg-blue-600/30 text-blue-400 border border-blue-500/30' : 'text-slate-500'}`}>
+          1. Bilgiler
+        </div>
+        <span className="text-slate-600 px-1">→</span>
+        <div className={`flex-1 text-center py-2 rounded-xl transition-all ${getStepNumber() >= 2 ? 'bg-blue-600/30 text-blue-400 border border-blue-500/30' : 'text-slate-500'}`}>
+          2. E-posta
+        </div>
+        <span className="text-slate-600 px-1">→</span>
+        <div className={`flex-1 text-center py-2 rounded-xl transition-all ${getStepNumber() === 3 ? 'bg-emerald-500/30 text-emerald-400 border border-emerald-500/30' : 'text-slate-500'}`}>
+          3. Tamamlama
+        </div>
+      </div>
+
       <h2 className="text-2xl font-bold mb-6 flex items-center gap-2 tracking-tighter uppercase text-white">
         <CheckCircle2 className="text-blue-500" /> Etkinlik Kaydı
       </h2>
 
       {errorMessage && (
-        <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-xs flex items-center gap-2 animate-in zoom-in duration-300">
-          <AlertCircle size={16} className="shrink-0" /> {errorMessage}
+        <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-500 text-[11px] flex items-center gap-2 animate-in zoom-in duration-300">
+          <AlertCircle size={16} /> {errorMessage}
         </div>
       )}
 
@@ -336,37 +356,25 @@ export default function NewRegistration({
           </div>
 
           {emailSent && !emailVerified && (
-            <div className="space-y-2 animate-in slide-in-from-top-2 duration-300">
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"><KeyRound size={18}/></div>
-                  <input 
-                    type="text" 
-                    placeholder="6 Haneli Kod"
-                    value={otpCode}
-                    onChange={(e) => {
-                      // Yazılırken veya yapıştırılırken boşluklar otomatik silinir, harf varsa büyütülür
-                      const cleanVal = e.target.value.replace(/\s+/g, '').toUpperCase();
-                      setOtpCode(cleanVal);
-                    }}
-                    className="w-full bg-white/10 border border-blue-500/30 rounded-2xl py-4 pl-12 pr-4 text-white uppercase tracking-widest outline-none focus:ring-2 focus:ring-blue-500/50"
-                  />
-                </div>
-                <button 
-                  type="button" 
-                  onClick={handleVerifyOTP}
-                  disabled={verifyingEmail}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 rounded-2xl font-bold transition-all disabled:opacity-30"
-                >
-                  {verifyingEmail ? <Loader2 size={18} className="animate-spin" /> : "ONAYLA"}
-                </button>
+            <div className="flex gap-2 animate-in slide-in-from-top-2 duration-300">
+              <div className="relative flex-1">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"><KeyRound size={18}/></div>
+                <input 
+                  type="text" 
+                  placeholder="6 Haneli Kod"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value)}
+                  className="w-full bg-white/10 border border-blue-500/30 rounded-2xl py-4 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500/50"
+                />
               </div>
-
-              {/* OTP İpucu Kutusu */}
-              <div className="bg-blue-500/10 border border-blue-500/20 p-2.5 rounded-xl flex items-center gap-2 text-[10px] text-blue-300">
-                <Info size={14} className="shrink-0 text-blue-400" />
-                <span>Kodu yapıştırırken başında/sonunda ekstra boşluk kalmamasına dikkat edin.</span>
-              </div>
+              <button 
+                type="button" 
+                onClick={handleVerifyOTP}
+                disabled={verifyingEmail}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 rounded-2xl font-bold transition-all disabled:opacity-30"
+              >
+                {verifyingEmail ? <Loader2 size={18} className="animate-spin" /> : "ONAYLA"}
+              </button>
             </div>
           )}
           
@@ -418,56 +426,49 @@ export default function NewRegistration({
           </div>
         )}
 
-        {/* WhatsApp Yönlendirme ve Akıllı Onay Alanı */}
-        <div className="space-y-3 pt-2">
-          <a 
-            href={emailVerified ? (whatsappLink || "#") : undefined} 
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => {
-              if (emailVerified) {
-                setWaJoined(true);
-                setCountdown(3); // 3 Saniyelik Sayaç
-              }
-            }}
-            className={`w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold transition-all ${
-              !emailVerified 
-                ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50' 
-                : waJoined 
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' 
-                  : 'bg-[#25D366] text-white hover:scale-[1.01] shadow-lg shadow-[#25D366]/20'
-            }`}
-          >
-            <MessageCircle size={20} />
-            {waJoined 
-              ? (countdown > 0 ? `KONTROL EDİLİYOR (${countdown})` : "GRUBA KATILDINIZ ✓") 
-              : "WHATSAPP GRUBUNA KATIL"}
-          </a>
+        <a 
+          href={emailVerified ? (whatsappLink || "#") : undefined} 
+          target="_blank"
+          onClick={() => {
+            if (emailVerified) {
+              setWaJoined(true);
+              setCountdown(5);
+            }
+          }}
+          className={`w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold transition-all ${
+            !emailVerified 
+              ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50' 
+              : waJoined 
+                ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/50' 
+                : 'bg-[#25D366] text-white hover:scale-[1.01]'
+          }`}
+        >
+          <MessageCircle size={20} />
+          {waJoined ? (countdown > 0 ? `DOĞRULANIYOR (${countdown})` : "GRUBA KATILINDI") : "WHATSAPP GRUBUNA KATIL"}
+        </a>
 
-          {/* WhatsApp Açıldığında Göz Yormayan Yönlendirme İkazı */}
-          {waJoined && (
-            <div className="bg-emerald-500/10 border border-emerald-500/30 p-3 rounded-2xl flex items-center justify-between text-xs text-emerald-300 animate-in fade-in slide-in-from-top-1 duration-300">
-              <div className="flex items-center gap-2">
-                <Info size={16} className="text-emerald-400 shrink-0" />
-                <span>Gruba katıldıysanız kaydınızı sonlandırmak için aşağıdaki butona basın.</span>
-              </div>
-              <ArrowRight size={16} className="text-emerald-400 animate-pulse shrink-0 ml-1" />
-            </div>
-          )}
+        {/* WHATSAPP TIKLANDIĞINDA BELİREN AKILLI UYARI İKAZI */}
+        {waJoined && (
+          <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-2xl flex items-center gap-3 text-amber-200 text-xs animate-in zoom-in duration-300">
+            <Info size={20} className="text-amber-400 shrink-0" />
+            <span className="font-semibold leading-relaxed">
+              Gruba katıldıktan sonra başvurunuzu tamamlamak için aşağıdaki <strong className="text-white underline">"KAYDI TAMAMLA"</strong> butonuna basmayı unutmayın!
+            </span>
+            <ArrowDownRight size={18} className="text-amber-400 animate-bounce shrink-0 ml-auto" />
+          </div>
+        )}
 
-          <button
-            disabled={loading || !waJoined || countdown > 0 || !emailVerified}
-            type="submit"
-            className={`w-full font-bold py-5 rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2 text-white ${
-              waJoined && countdown === 0 
-                ? 'bg-blue-600 hover:bg-blue-500 ring-4 ring-blue-500/30 animate-pulse' 
-                : 'bg-blue-600 disabled:opacity-30 disabled:grayscale'
-            }`}
-          >
-            {loading ? <Loader2 className="animate-spin" /> : "KAYDI TAMAMLA"}
-          </button>
-        </div>
-
+        <button
+          disabled={loading || !waJoined || countdown > 0 || !emailVerified}
+          type="submit"
+          className={`w-full font-bold py-5 rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2 text-white ${
+            waJoined && countdown === 0 
+              ? 'bg-blue-600 hover:bg-blue-500 ring-4 ring-blue-500/30 animate-pulse' 
+              : 'bg-blue-600 disabled:opacity-20 disabled:grayscale'
+          }`}
+        >
+          {loading ? <Loader2 className="animate-spin" /> : "KAYDI TAMAMLA"}
+        </button>
       </form>
     </div>
   );
