@@ -5,8 +5,8 @@ import { supabase } from '@/lib/supabase';
 import RegistrationForm from './components/RegistrationForm';
 import SeatMap from './components/SeatMap';
 import TicketView from './components/TicketView';
-import NewRegistration from './components/NewRegistration'; // Yeni eklendi
-import { UserPlus, Info, ArrowLeft } from 'lucide-react'; // Yeni ikonlar
+import NewRegistration from './components/NewRegistration'; 
+import { UserPlus, Info, ArrowLeft, HelpCircle } from 'lucide-react'; 
 
 export default function Home() {
   const [adSoyad, setAdSoyad] = useState("");
@@ -24,6 +24,69 @@ export default function Home() {
   const [eventSlots, setEventSlots] = useState<any[]>([]);
 
   const [timeLeft, setTimeLeft] = useState(60);
+
+  // Driver.js İnteraktif Rehber Başlatıcı
+  const startTutorial = () => {
+    // @ts-ignore
+    if (typeof window !== 'undefined' && window.driver) {
+      // @ts-ignore
+      const driverObj = window.driver.js.driver({
+        showProgress: true,
+        nextBtnText: 'Sonraki ➔',
+        prevBtnText: '⬅ Geri',
+        doneBtnText: 'Anladım, Harika! 👍',
+        steps: [
+          { 
+            element: '#step-select-event', 
+            popover: { 
+              title: '1. Etkinlik Seçimi 🎬', 
+              description: 'Önce Bilet almak veya kayıt olmak istediğin etkinliği seç!',
+              side: "bottom",
+              align: "center"
+            } 
+          },
+          { 
+            element: '#step-new-reg-btn', 
+            popover: { 
+              title: '2. Kayıt Oluşturma 📝', 
+              description: 'Eğer henüz sisteme kaydolmadıysan "Yeni Kayıt Oluştur" butonuna basarak formu aç.',
+              side: "top",
+              align: "center"
+            } 
+          },
+          { 
+            element: '#step-form-inputs', 
+            popover: { 
+              title: '3. Bilgilerini Gir & Doğrula ✉️', 
+              description: 'Bilgilerini yaz, e-postana gelen 6 haneli doğrulama kodunu girip doğru şekilde onayla.',
+              side: "top",
+              align: "center"
+            } 
+          },
+          { 
+            element: '#step-whatsapp-section', 
+            popover: { 
+              title: '4. WhatsApp & Kaydı Tamamla 💬', 
+              description: 'WhatsApp grubuna katıl! Ancak unutma, siteye geri dönüp mutlaka "KAYDI TAMAMLA" butonuna basmalısın!',
+              side: "top",
+              align: "center"
+            } 
+          },
+          { 
+            element: '#step-get-ticket', 
+            popover: { 
+              title: '5. Biletini Hazırla 🎟️', 
+              description: 'Kaydın onaylandıktan sonra tekrar siteye gel, etkinliği ve bilgilerini girerek QR kodlu biletini al!',
+              side: "center",
+              align: "center"
+            } 
+          }
+        ]
+      });
+
+      driverObj.drive();
+    }
+  };
 
   useEffect(() => {
     window.history.pushState({ step }, `Step ${step}`);
@@ -127,7 +190,6 @@ export default function Home() {
     setLoading(true);
 
     try {
-      // Form alanlarını güvenli hale getiriyoruz
       const temizAd = adSoyad.trim();
       const temizTel = telefon.replace(/\D/g, "");
 
@@ -137,7 +199,6 @@ export default function Home() {
         return;
       }
 
-      // Veritabanı sorgusu
       const { data, error: supabaseError } = await supabase
         .from('katilimcilar')
         .select('*')
@@ -148,19 +209,16 @@ export default function Home() {
 
       if (supabaseError) throw supabaseError;
 
-      // Kullanıcı hiç bulunamadıysa
       if (!data) {
         setError(`${selectedEvent.event_name || 'Bu etkinlik'} için kayıt bulunamadı. Lütfen bilgilerinizi kontrol edin.`);
         return; 
       } 
 
-      // Kullanıcı var ama onaylanmadıysa
       if (data.onayli_mi === false) {
         setError("Kaydınız sisteme ulaştı ancak henüz onaylanmadı. Lütfen onay bekleyin.");
         return;
       }
       
-      // Başarılı giriş
       setCurrentUserData(data);
       setUserDisplayName(data.ad_soyad);
       
@@ -245,7 +303,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#020617] text-slate-200 p-6 flex flex-col items-center justify-start font-sans overflow-x-hidden relative">
-      <header className="w-full max-w-2xl py-8 mb-4 text-center z-50">
+      <header className="w-full max-w-2xl py-8 mb-2 text-center z-50 flex flex-col items-center justify-center">
         <div className="space-y-1">
           <h2 className="text-blue-500 font-bold text-[10px] tracking-[0.3em] uppercase italic">
             ANKARA MEDIPOL SINEMA VE TIYATRO TOPLULUGU
@@ -254,6 +312,15 @@ export default function Home() {
             FLICK <span className="text-white">BILET</span>
           </h1>
         </div>
+
+        {/* NASIL KULLANILIR? REHBER BUTONU */}
+        <button
+          type="button"
+          onClick={startTutorial}
+          className="mt-4 inline-flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 px-4 py-2 rounded-2xl text-xs font-bold transition-all shadow-lg backdrop-blur-md active:scale-95 cursor-pointer"
+        >
+          <HelpCircle size={15} className="text-amber-400" /> Nasıl Kullanılır? (Rehber)
+        </button>
       </header>
 
       <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none select-none">
@@ -280,31 +347,39 @@ export default function Home() {
           <div className="relative z-10">
             {(step === 0 || step === 1) && (
               <div className="space-y-6">
-                <RegistrationForm 
-                  step={step}
-                  setStep={setStep}
-                  eventSlots={eventSlots}
-                  loading={loading}
-                  selectedEvent={selectedEvent}
-                  setSelectedEvent={setSelectedEvent}
-                  adSoyad={adSoyad}
-                  setAdSoyad={setAdSoyad}
-                  telefon={telefon}
-                  setTelefon={setTelefon}
-                  handleSubmit={handleSubmit}
-                  error={error}
-                />
+                
+                {/* Tur Adımı 1: Etkinlik Seçimi */}
+                <div id="step-select-event">
+                  <RegistrationForm 
+                    step={step}
+                    setStep={setStep}
+                    eventSlots={eventSlots}
+                    loading={loading}
+                    selectedEvent={selectedEvent}
+                    setSelectedEvent={setSelectedEvent}
+                    adSoyad={adSoyad}
+                    setAdSoyad={setAdSoyad}
+                    telefon={telefon}
+                    setTelefon={setTelefon}
+                    handleSubmit={handleSubmit}
+                    error={error}
+                  />
+                </div>
                 
                 {/* Step 1'deyken Yeni Kayıt Butonunu göster */}
                 {step === 1 && (
                   <div className="pt-6 border-t border-white/5 text-center">
                     <p className="text-[10px] text-slate-500 mb-4 uppercase font-black tracking-widest italic">Henüz Kayıt Yapmadınız mı?</p>
+                    
+                    {/* Tur Adımı 2: Yeni Kayıt Butonu */}
                     <button 
+                      id="step-new-reg-btn"
                       onClick={() => setStep(4)}
                       className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl flex items-center justify-center gap-2 transition-all font-bold text-xs uppercase shadow-lg shadow-blue-500/20 active:scale-95"
                     >
                       <UserPlus size={16} /> Yeni Kayıt Oluştur
                     </button>
+
                     <button onClick={() => setStep(0)} className="mt-4 w-full text-slate-600 text-[10px] font-black uppercase hover:text-white transition-colors flex items-center justify-center gap-2">
                       <ArrowLeft size={12} /> Etkinlik Listesine Dön
                     </button>
@@ -350,18 +425,20 @@ export default function Home() {
                 loading={loading}
                 setStep={setStep}
                 setError={setError}
-                // DÜZELTİLEN SATIR: selectedSlotId yerine selectedEvent içindeki slot_id'yi kullanıyoruz.
                 seatLayout={eventSlots.find(s => s.slot_id === selectedEvent?.slot_id)?.seat_layout || []}
               />
             )}
 
             {step === 3 && (
-              <TicketView 
-                userDisplayName={userDisplayName}
-                selectedSeat={selectedSeat}
-                qrValue={qrValue}
-                indirPDF={indirPDF}
-              />
+              /* Tur Adımı 5: Bilet Görünümü */
+              <div id="step-get-ticket">
+                <TicketView 
+                  userDisplayName={userDisplayName}
+                  selectedSeat={selectedSeat}
+                  qrValue={qrValue}
+                  indirPDF={indirPDF}
+                />
+              </div>
             )}
           </div>
         </div>
