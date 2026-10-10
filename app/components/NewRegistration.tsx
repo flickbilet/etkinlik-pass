@@ -447,8 +447,8 @@ export default function NewRegistration({
           {waJoined ? (countdown > 0 ? `DOĞRULANIYOR (${countdown})` : "GRUBA KATILINDI") : "WHATSAPP GRUBUNA KATIL"}
         </a>
 
-        {/* WHATSAPP TIKLANDIĞINDA BELİREN AKILLI UYARI İKAZI */}
-        {waJoined && (
+        {/* E-POSTA DOĞRULANDIĞI ANDA BELİREN AKILLI UYARI İKAZI */}
+        {emailVerified && (
           <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-2xl flex items-center gap-3 text-amber-200 text-xs animate-in zoom-in duration-300">
             <Info size={20} className="text-amber-400 shrink-0" />
             <span className="font-semibold leading-relaxed">
