@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 // Yeni oluşturduğumuz anket butonunu içe aktarıyoruz
 import FloatingSurveyButton from "./components/FloatingSurveyButton";
@@ -42,6 +43,17 @@ export default function RootLayout({
       lang="tr" // Dil desteğini Türkçe olarak güncelledim
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        {/* Driver.js (İnteraktif Rehber) CSS ve JS Linkleri */}
+        <link
+          rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.css"
+        />
+        <Script
+          src="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.js.iife.js"
+          strategy="afterInteractive"
+        />
+      </head>
       <body className="min-h-full flex flex-col">
         {/* Sayfa içerikleri burada render edilir */}
         {children}

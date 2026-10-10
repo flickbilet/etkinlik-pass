@@ -194,7 +194,6 @@ export default function NewRegistration({
     return ` (${s.slice(0, 3)}) ${s.slice(3, 6)} ${s.slice(6, 8)} ${s.slice(8, 10)}`;
   };
 
-  // İlerleme adımı hesaplama
   const getStepNumber = () => {
     if (waJoined) return 3;
     if (emailVerified) return 2;
@@ -326,7 +325,8 @@ export default function NewRegistration({
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-3">
+        {/* Tur Adımı 3: Bilgi Girdileri & E-posta OTP Doğrulama */}
+        <div id="step-form-inputs" className="grid grid-cols-1 gap-3">
           <InputItem icon={<User size={18}/>} placeholder="Ad Soyad" value={formData.ad_soyad} onChange={(v: any) => setFormData({...formData, ad_soyad: v})} />
           
           <div className="relative">
@@ -356,7 +356,6 @@ export default function NewRegistration({
           <InputItem icon={<School size={18}/>} placeholder="Okul / Bölüm" value={formData.okul} onChange={(v: any) => setFormData({...formData, okul: v})} />
           <InputItem icon={<Users size={18}/>} placeholder="Referans (Varsa)" value={formData.referans} onChange={(v: any) => setFormData({...formData, referans: v})} />
 
-          {/* E-POSTA VE OTP DOĞRULAMA (WHATSAPP'IN HEMEN ÜSTÜNE TAŞINDI) */}
           <div className="relative pt-1">
             <InputItem 
               icon={<Mail size={18}/>} 
@@ -427,49 +426,51 @@ export default function NewRegistration({
           </div>
         )}
 
-        {/* E-POSTA DOĞRULANDIĞINDA TAM WHATSAPP BUTONUNUN ÜSTÜNDE ÇIKAN UYARI */}
-        {emailVerified && (
-          <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-2xl flex items-center gap-3 text-amber-200 text-xs animate-in zoom-in duration-300">
-            <Info size={20} className="text-amber-400 shrink-0" />
-            <span className="font-semibold leading-relaxed">
-              Gruba katıldıktan sonra başvurunuzu tamamlamak için aşağıdaki <strong className="text-white underline">"KAYDI TAMAMLA"</strong> butonuna basmayı unutmayın!
-            </span>
-            <ArrowDownRight size={18} className="text-amber-400 animate-bounce shrink-0 ml-auto" />
-          </div>
-        )}
+        {/* Tur Adımı 4: WhatsApp Grubu ve Kaydı Tamamla Alanı */}
+        <div id="step-whatsapp-section" className="space-y-4 pt-1">
+          {emailVerified && (
+            <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-2xl flex items-center gap-3 text-amber-200 text-xs animate-in zoom-in duration-300">
+              <Info size={20} className="text-amber-400 shrink-0" />
+              <span className="font-semibold leading-relaxed">
+                Gruba katıldıktan sonra başvurunuzu tamamlamak için aşağıdaki <strong className="text-white underline">"KAYDI TAMAMLA"</strong> butonuna basmayı unutmayın!
+              </span>
+              <ArrowDownRight size={18} className="text-amber-400 animate-bounce shrink-0 ml-auto" />
+            </div>
+          )}
 
-        <a 
-          href={emailVerified ? (whatsappLink || "#") : undefined} 
-          target="_blank"
-          onClick={() => {
-            if (emailVerified) {
-              setWaJoined(true);
-              setCountdown(5);
-            }
-          }}
-          className={`w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold transition-all ${
-            !emailVerified 
-              ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50' 
-              : waJoined 
-                ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/50' 
-                : 'bg-[#25D366] text-white hover:scale-[1.01]'
-          }`}
-        >
-          <MessageCircle size={20} />
-          {waJoined ? (countdown > 0 ? `DOĞRULANIYOR (${countdown})` : "GRUBA KATILINDI") : "WHATSAPP GRUBUNA KATIL"}
-        </a>
+          <a 
+            href={emailVerified ? (whatsappLink || "#") : undefined} 
+            target="_blank"
+            onClick={() => {
+              if (emailVerified) {
+                setWaJoined(true);
+                setCountdown(5);
+              }
+            }}
+            className={`w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold transition-all ${
+              !emailVerified 
+                ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50' 
+                : waJoined 
+                  ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/50' 
+                  : 'bg-[#25D366] text-white hover:scale-[1.01]'
+            }`}
+          >
+            <MessageCircle size={20} />
+            {waJoined ? (countdown > 0 ? `DOĞRULANIYOR (${countdown})` : "GRUBA KATILINDI") : "WHATSAPP GRUBUNA KATIL"}
+          </a>
 
-        <button
-          disabled={loading || !waJoined || countdown > 0 || !emailVerified}
-          type="submit"
-          className={`w-full font-bold py-5 rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2 text-white ${
-            waJoined && countdown === 0 
-              ? 'bg-blue-600 hover:bg-blue-500 ring-4 ring-blue-500/30 animate-pulse' 
-              : 'bg-blue-600 disabled:opacity-20 disabled:grayscale'
-          }`}
-        >
-          {loading ? <Loader2 className="animate-spin" /> : "KAYDI TAMAMLA"}
-        </button>
+          <button
+            disabled={loading || !waJoined || countdown > 0 || !emailVerified}
+            type="submit"
+            className={`w-full font-bold py-5 rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2 text-white ${
+              waJoined && countdown === 0 
+                ? 'bg-blue-600 hover:bg-blue-500 ring-4 ring-blue-500/30 animate-pulse' 
+                : 'bg-blue-600 disabled:opacity-20 disabled:grayscale'
+            }`}
+          >
+            {loading ? <Loader2 className="animate-spin" /> : "KAYDI TAMAMLA"}
+          </button>
+        </div>
       </form>
     </div>
   );
