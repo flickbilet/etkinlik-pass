@@ -344,6 +344,15 @@ export default function Home() {
             FLICK <span className="text-white">BILET</span>
           </h1>
         </div>
+
+        {/* YUKARIYA TAŞINAN SADE NASIL KULLANILIR BUTONU */}
+        <button
+          type="button"
+          onClick={startTutorial}
+          className="mt-4 inline-flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/50 text-slate-400 hover:text-slate-200 hover:bg-slate-800 px-3.5 py-1.5 rounded-xl text-[11px] font-medium transition-all active:scale-95 cursor-pointer"
+        >
+          <HelpCircle size={13} className="text-slate-400" /> Nasıl Kullanılır?
+        </button>
       </header>
 
       <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none select-none">
@@ -408,17 +417,6 @@ export default function Home() {
                     </button>
                   </div>
                 )}
-
-                {/* SADE VE MAT NASIL KULLANILIR BUTONU - ETKİNLİK SLOTLARININ ALTINDA */}
-                <div className="pt-2 text-center">
-                  <button
-                    type="button"
-                    onClick={startTutorial}
-                    className="inline-flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/50 text-slate-400 hover:text-slate-200 hover:bg-slate-800 px-3.5 py-1.5 rounded-xl text-[11px] font-medium transition-all active:scale-95 cursor-pointer"
-                  >
-                    <HelpCircle size={13} className="text-slate-400" /> Nasıl Kullanılır?
-                  </button>
-                </div>
               </div>
             )}
 
