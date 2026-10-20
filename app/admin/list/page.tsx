@@ -4,7 +4,8 @@ import { supabase } from '@/lib/supabase';
 import { useAdmin } from '../layout';
 import { 
   Users, CheckCircle, XCircle, Loader2, Search, X, 
-  RefreshCcw, TicketCheck, AlertTriangle, Save, Trash2, Edit3, Armchair
+  RefreshCcw, TicketCheck, AlertTriangle, Save, Trash2, Edit3, Armchair,
+  FileText, ExternalLink
 } from 'lucide-react';
 
 export default function ListPage() {
@@ -15,6 +16,9 @@ export default function ListPage() {
   const [filterNotTicketed, setFilterNotTicketed] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingPerson, setEditingPerson] = useState<any>(null);
+
+  // DEKONT İNCELEME MODALI STATE'İ
+  const [viewingReceiptUrl, setViewingReceiptUrl] = useState<string | null>(null);
 
   const formatPhoneNumber = (phone: any) => {
     let cleaned = String(phone).replace(/\D/g, ''); 
@@ -87,6 +91,50 @@ export default function ListPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+      {/* DEKONT İNCELEME MODALI */}
+      {viewingReceiptUrl && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="w-full max-w-lg bg-slate-900 border border-white/10 rounded-[2.5rem] p-6 shadow-2xl flex flex-col items-center">
+            <div className="w-full flex justify-between items-center mb-4 pb-3 border-b border-white/5">
+              <span className="text-xs font-black uppercase text-blue-400 flex items-center gap-2">
+                <FileText size={16} /> Katılımcı Dekontu
+              </span>
+              <button 
+                onClick={() => setViewingReceiptUrl(null)} 
+                className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="w-full max-h-[60vh] overflow-auto rounded-2xl border border-white/5 bg-slate-950 p-2 flex justify-center">
+              <img 
+                src={viewingReceiptUrl} 
+                alt="Dekont Görseli" 
+                className="max-w-full h-auto object-contain rounded-xl"
+              />
+            </div>
+
+            <div className="w-full flex gap-3 mt-4">
+              <a 
+                href={viewingReceiptUrl} 
+                target="_blank" 
+                rel="noreferrer"
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-2xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all"
+              >
+                <ExternalLink size={16} /> Yeni Sekmede Aç
+              </a>
+              <button 
+                onClick={() => setViewingReceiptUrl(null)}
+                className="px-6 bg-slate-800 hover:bg-slate-700 text-slate-300 py-3 rounded-2xl font-bold text-xs uppercase tracking-wider transition-all"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isEditModalOpen && editingPerson && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
           <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-[2.5rem] p-8 shadow-2xl">
@@ -157,7 +205,7 @@ export default function ListPage() {
 
                   {/* YENİ: Daha Düzenli Veri Yapısı Bloğu */}
                   <div className="mt-4 grid grid-cols-1 gap-y-3 pt-4 border-t border-white/5">
-                    <div className="flex flex-wrap gap-4">
+                    <div className="flex flex-wrap gap-4 items-center">
                       {person.email && (
                         <div className="flex flex-col gap-1 min-w-[140px]">
                           <span className="text-blue-500 font-black uppercase text-[9px] tracking-widest">E-Posta</span>
@@ -169,6 +217,17 @@ export default function ListPage() {
                           <span className="text-emerald-500 font-black uppercase text-[9px] tracking-widest">Okul / Bölüm</span>
                           <span className="text-xs text-slate-300">{person.okul}</span>
                         </div>
+                      )}
+
+                      {/* DEKONT GÖRÜNTÜLEME BUTONU */}
+                      {person.dekont_url && (
+                        <button
+                          type="button"
+                          onClick={() => setViewingReceiptUrl(person.dekont_url)}
+                          className="flex items-center gap-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ml-auto"
+                        >
+                          <FileText size={14} /> DEKONTU İNCELE
+                        </button>
                       )}
                     </div>
                     {person.referans && (
