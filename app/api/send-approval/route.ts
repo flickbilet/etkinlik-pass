@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     }
 
     const data = await resend.emails.send({
-      from: 'Flick Bilet <onboarding@resend.dev>',
+      from: 'Flick Bilet <Flick Bilet <bilet@flickbilet.com>',
       to: [email],
       subject: '🎉 Etkinlik Kaydınız Onaylandı! - Flick Bilet',
       html: `
