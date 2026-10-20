@@ -17,7 +17,7 @@ export default function ListPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingPerson, setEditingPerson] = useState<any>(null);
 
-  // DEKONT İNCELEME MODALI STATE'İ
+  // OPTİMİZE DEKONT MODALI STATE'İ
   const [viewingReceiptUrl, setViewingReceiptUrl] = useState<string | null>(null);
 
   const formatPhoneNumber = (phone: any) => {
@@ -48,35 +48,35 @@ export default function ListPage() {
   };
 
   const deleteAllParticipants = async () => {
-  if (!participants || participants.length === 0) {
-    alert("Silinecek kimse bulunamadı.");
-    return;
-  }
-
-  const confirmText = prompt(`Slot ${selectedSlotId} listesini temizlemek için ONAYLIYORUM yazın.`);
-  
-  if (confirmText === "ONAYLIYORUM") {
-    try {
-      setLoading(true);
-      const idsToDelete = participants.map((p: any) => p.id);
-      const { error } = await supabase
-        .from('katilimcilar')
-        .delete()
-        .in('id', idsToDelete);
-
-      if (error) throw error;
-
-      alert("Liste başarıyla temizlendi.");
-      window.location.reload(); 
-
-    } catch (err: any) {
-      console.error("Silme Hatası:", err);
-      alert("Hata oluştu: " + (err.message || "Bilinmeyen hata"));
-    } finally {
-      setLoading(false);
+    if (!participants || participants.length === 0) {
+      alert("Silinecek kimse bulunamadı.");
+      return;
     }
-  }
-};
+
+    const confirmText = prompt(`Slot ${selectedSlotId} listesini temizlemek için ONAYLIYORUM yazın.`);
+    
+    if (confirmText === "ONAYLIYORUM") {
+      try {
+        setLoading(true);
+        const idsToDelete = participants.map((p: any) => p.id);
+        const { error } = await supabase
+          .from('katilimcilar')
+          .delete()
+          .in('id', idsToDelete);
+
+        if (error) throw error;
+
+        alert("Liste başarıyla temizlendi.");
+        window.location.reload(); 
+
+      } catch (err: any) {
+        console.error("Silme Hatası:", err);
+        alert("Hata oluştu: " + (err.message || "Bilinmeyen hata"));
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
 
   const filteredList = participants.filter((p: any) => {
     const isApproved = p.onayli_mi === true;
@@ -91,17 +91,17 @@ export default function ListPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      {/* DEKONT İNCELEME MODALI */}
+      {/* OPTİMİZE DEKONT MODALI */}
       {viewingReceiptUrl && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-200">
           <div className="w-full max-w-lg bg-slate-900 border border-white/10 rounded-[2.5rem] p-6 shadow-2xl flex flex-col items-center">
             <div className="w-full flex justify-between items-center mb-4 pb-3 border-b border-white/5">
-              <span className="text-xs font-black uppercase text-blue-400 flex items-center gap-2">
+              <span className="text-xs font-black uppercase text-blue-400 flex items-center gap-2 tracking-wider">
                 <FileText size={16} /> Katılımcı Dekontu
               </span>
               <button 
                 onClick={() => setViewingReceiptUrl(null)} 
-                className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
+                className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 transition-colors"
               >
                 <X size={20} />
               </button>
@@ -111,7 +111,9 @@ export default function ListPage() {
               <img 
                 src={viewingReceiptUrl} 
                 alt="Dekont Görseli" 
-                className="max-w-full h-auto object-contain rounded-xl"
+                loading="lazy"
+                decoding="async"
+                className="max-w-full h-auto object-contain rounded-xl select-none"
               />
             </div>
 
@@ -120,13 +122,13 @@ export default function ListPage() {
                 href={viewingReceiptUrl} 
                 target="_blank" 
                 rel="noreferrer"
-                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-2xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all"
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95"
               >
                 <ExternalLink size={16} /> Yeni Sekmede Aç
               </a>
               <button 
                 onClick={() => setViewingReceiptUrl(null)}
-                className="px-6 bg-slate-800 hover:bg-slate-700 text-slate-300 py-3 rounded-2xl font-bold text-xs uppercase tracking-wider transition-all"
+                className="px-6 bg-slate-800 hover:bg-slate-700 text-slate-300 py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider transition-all"
               >
                 Kapat
               </button>
@@ -179,7 +181,7 @@ export default function ListPage() {
           return (
             <div key={person.id} className="bg-slate-900/40 p-6 md:p-8 rounded-[2.5rem] border border-white/5 shadow-xl hover:border-white/10 transition-colors">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-                <div className="space-y-4 flex-1">
+                <div className="space-y-4 flex-1 w-full">
                   <div className="flex flex-wrap items-center gap-3">
                     <p className="font-bold text-xl md:text-2xl leading-tight text-white">{person.ad_soyad}</p>
                     {isDuplicate && (
@@ -203,33 +205,36 @@ export default function ListPage() {
                     <p className="text-[10px] text-slate-600 font-mono tracking-widest uppercase">Kayıt No: {person.id} | Slot: {person.etkinlik_id}</p>
                   </div>
 
-                  {/* YENİ: Daha Düzenli Veri Yapısı Bloğu */}
+                  {/* Veri Yapısı Bloğu & DÜZENLİ DEKONT BUTONU */}
                   <div className="mt-4 grid grid-cols-1 gap-y-3 pt-4 border-t border-white/5">
-                    <div className="flex flex-wrap gap-4 items-center">
-                      {person.email && (
-                        <div className="flex flex-col gap-1 min-w-[140px]">
-                          <span className="text-blue-500 font-black uppercase text-[9px] tracking-widest">E-Posta</span>
-                          <span className="text-xs text-slate-300 break-all">{person.email}</span>
-                        </div>
-                      )}
-                      {person.okul && (
-                        <div className="flex flex-col gap-1 min-w-[140px] flex-1">
-                          <span className="text-emerald-500 font-black uppercase text-[9px] tracking-widest">Okul / Bölüm</span>
-                          <span className="text-xs text-slate-300">{person.okul}</span>
-                        </div>
-                      )}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex flex-wrap gap-4 items-center flex-1">
+                        {person.email && (
+                          <div className="flex flex-col gap-1 min-w-[140px]">
+                            <span className="text-blue-500 font-black uppercase text-[9px] tracking-widest">E-Posta</span>
+                            <span className="text-xs text-slate-300 break-all">{person.email}</span>
+                          </div>
+                        )}
+                        {person.okul && (
+                          <div className="flex flex-col gap-1 min-w-[140px]">
+                            <span className="text-emerald-500 font-black uppercase text-[9px] tracking-widest">Okul / Bölüm</span>
+                            <span className="text-xs text-slate-300">{person.okul}</span>
+                          </div>
+                        )}
+                      </div>
 
-                      {/* DEKONT GÖRÜNTÜLEME BUTONU */}
+                      {/* WEB & MOBİL HİZALAMASI İYİLEŞTİRİLMİŞ DEKONT BUTONU */}
                       {person.dekont_url && (
                         <button
                           type="button"
                           onClick={() => setViewingReceiptUrl(person.dekont_url)}
-                          className="flex items-center gap-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ml-auto"
+                          className="w-full sm:w-auto flex items-center justify-center gap-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 px-4 py-2.5 rounded-xl text-xs font-bold transition-all shrink-0 active:scale-95"
                         >
                           <FileText size={14} /> DEKONTU İNCELE
                         </button>
                       )}
                     </div>
+
                     {person.referans && (
                       <div className="flex flex-col gap-1 bg-slate-950/50 p-3 rounded-xl border border-white/5">
                         <span className="text-purple-500 font-black uppercase text-[9px] tracking-widest">Referans Bilgisi</span>
