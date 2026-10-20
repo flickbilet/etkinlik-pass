@@ -12,6 +12,9 @@ export default function PendingParticipantsPage() {
   const [loading, setLoading] = useState(true);
   const [errorLog, setErrorLog] = useState<string | null>(null);
 
+  // İŞLEM YAPILAN KULLANICI ID'Sİ (ÇİFT TIKLAMAYI ÖNLEMEK VE LOADING GÖSTERMEK İÇİN)
+  const [approvingId, setApprovingId] = useState<string | number | null>(null);
+
   // REDDETME MODALI STATE'LERİ
   const [rejectingPerson, setRejectingPerson] = useState<any | null>(null);
   const [isRejecting, setIsRejecting] = useState(false);
@@ -50,30 +53,42 @@ export default function PendingParticipantsPage() {
   }
 
   async function approveUser(person: any) {
-    const { error } = await supabase
-      .from('katilimcilar')
-      .update({ onayli_mi: true })
-      .eq('id', person.id);
+    if (approvingId) return; // Zaten işlem yapılıyorsa engelle
+    setApprovingId(person.id);
 
-    if (!error) {
-      setParticipants(prev => prev.filter(p => p.id !== person.id));
+    try {
+      // 1. Supabase'de kullanıcının durumunu onaylandı yap
+      const { error } = await supabase
+        .from('katilimcilar')
+        .update({ onayli_mi: true })
+        .eq('id', person.id);
 
-      if (person.email) {
-        try {
-          await fetch('/api/send-approval', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: person.email,
-              ad_soyad: person.ad_soyad
-            }),
-          });
-        } catch (err) {
-          console.error("E-posta gönderme hatası:", err);
+      if (error) throw error;
+
+      // 2. Eğer kullanıcının email adresi varsa Resend API rotasına e-posta isteği at
+      if (person.email && String(person.email).trim() !== "") {
+        const res = await fetch('/api/send-approval', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: String(person.email).trim(),
+            ad_soyad: person.ad_soyad
+          }),
+        });
+
+        if (!res.ok) {
+          const resData = await res.json();
+          console.error("Resend E-posta Gönderme Hatası:", resData.error);
         }
       }
-    } else {
-      alert("Hata: " + error.message);
+
+      // 3. İşlem başarılı olunca katılımcıyı bekleyenler listesinden kaldır
+      setParticipants(prev => prev.filter(p => p.id !== person.id));
+
+    } catch (err: any) {
+      alert("Hata oluştu: " + (err.message || "Onaylama işlemi başarısız."));
+    } finally {
+      setApprovingId(null);
     }
   }
 
@@ -222,10 +237,17 @@ export default function PendingParticipantsPage() {
             {/* BUTONLAR (ONAYLA VE ALTINDA REDDET) */}
             <div className="flex flex-col gap-2 min-w-[130px]">
               <button 
+                disabled={approvingId === person.id}
                 onClick={() => approveUser(person)}
-                className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-2xl font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 text-xs uppercase tracking-wider"
+                className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white px-5 py-2.5 rounded-2xl font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 text-xs uppercase tracking-wider"
               >
-                <Check size={16} /> ONAYLA
+                {approvingId === person.id ? (
+                  <Loader2 className="animate-spin" size={16} />
+                ) : (
+                  <>
+                    <Check size={16} /> ONAYLA
+                  </>
+                )}
               </button>
 
               <button 
