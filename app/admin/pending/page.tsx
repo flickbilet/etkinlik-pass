@@ -49,14 +49,29 @@ export default function PendingParticipantsPage() {
     }
   }
 
-  async function approveUser(id: string) {
+  async function approveUser(person: any) {
     const { error } = await supabase
       .from('katilimcilar')
       .update({ onayli_mi: true })
-      .eq('id', id);
+      .eq('id', person.id);
 
     if (!error) {
-      setParticipants(prev => prev.filter(p => p.id !== id));
+      setParticipants(prev => prev.filter(p => p.id !== person.id));
+
+      if (person.email) {
+        try {
+          await fetch('/api/send-approval', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: person.email,
+              ad_soyad: person.ad_soyad
+            }),
+          });
+        } catch (err) {
+          console.error("E-posta gönderme hatası:", err);
+        }
+      }
     } else {
       alert("Hata: " + error.message);
     }
@@ -207,7 +222,7 @@ export default function PendingParticipantsPage() {
             {/* BUTONLAR (ONAYLA VE ALTINDA REDDET) */}
             <div className="flex flex-col gap-2 min-w-[130px]">
               <button 
-                onClick={() => approveUser(person.id)}
+                onClick={() => approveUser(person)}
                 className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-2xl font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 text-xs uppercase tracking-wider"
               >
                 <Check size={16} /> ONAYLA
