@@ -9,13 +9,14 @@ import { Sparkles } from 'lucide-react';
  * Kullanıcıyı anket sayfasına yönlendiren, animasyonlu ve sabit konumlu butondur.
  * Admin sayfalarında ve anketin kendi sayfasında render edilmez.
  */
+// Anket sistemi arayüzde aktif edilene kadar gizli tutulur
+const SHOW_SURVEY_IN_UI = false;
+
 export default function FloatingSurveyButton() {
   const pathname = usePathname();
 
-  // GİZLEME MANTIĞI:
-  // 1. Eğer kullanıcı '/anket' sayfasındaysa butonu gizle.
-  // 2. Eğer kullanıcı '/admin' ile başlayan herhangi bir yoldaysa butonu gizle.
-  if (pathname === '/anket' || pathname?.startsWith('/admin')) {
+  // Anket özelliği kapalıysa veya admin/anket sayfalarındaysa butonu render etme
+  if (!SHOW_SURVEY_IN_UI || pathname === '/anket' || pathname?.startsWith('/admin')) {
     return null;
   }
 

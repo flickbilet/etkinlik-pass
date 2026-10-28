@@ -1,12 +1,27 @@
 "use client";
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import RegistrationForm from './components/RegistrationForm';
 import SeatMap from './components/SeatMap';
 import TicketView from './components/TicketView';
 import NewRegistration from './components/NewRegistration'; 
-import { UserPlus, Info, ArrowLeft, HelpCircle } from 'lucide-react'; 
+import { UserPlus, Info, ArrowLeft, HelpCircle, ShieldCheck } from 'lucide-react'; 
+import { isEventPast, formatEventDateDisplay, unpackEventLocation } from '@/lib/dateUtils';
+
+// Bağlantı hatası durumunda jsPDF için güvenli Türkçe karakter dönüştürücü
+function toSafeAscii(text: string): string {
+  const map: Record<string, string> = {
+    'ç': 'c', 'Ç': 'C',
+    'ğ': 'g', 'Ğ': 'G',
+    'ı': 'i', 'İ': 'I',
+    'ö': 'o', 'Ö': 'O',
+    'ş': 's', 'Ş': 'S',
+    'ü': 'u', 'Ü': 'U',
+  };
+  return (text || '').replace(/[çÇğĞıİöÖşŞüÜ]/g, (ch) => map[ch] || ch);
+}
 
 export default function Home() {
   const [adSoyad, setAdSoyad] = useState("");
@@ -41,30 +56,14 @@ export default function Home() {
             element: '#step-select-event', 
             popover: { 
               title: '1. Etkinlik Seçimi 🎬', 
-              description: 'Lütfen listeden kaydolmak istediğin etkinliğe tıkla!',
+              description: 'Lütfen listeden kaydolmak veya bilet almak istediğin etkinliğe tıkla!',
               side: "bottom",
               align: "center"
             },
             onHighlightStarted: (element: any) => {
-              element?.addEventListener('click', (e: Event) => {
-                const target = e.target as HTMLElement;
-                const card = target.closest('.relative');
-                
-                // Eğer tıklanan etkinlik pasif/kapalıysa uyarı ver ve adımda kal
-                if (card && card.classList.contains('cursor-not-allowed')) {
-                  driverObj.getConfig().popover = {
-                    title: '⚠️ Kontenjan Dolu!',
-                    description: 'Seçtiğiniz etkinliğin kayıtları kapalı. Lütfen kayıt oluşturabilmek için kontenjanı açık olan başka bir etkinlik seçin!',
-                    side: "bottom",
-                    align: "center"
-                  };
-                  driverObj.refresh();
-                  return;
-                }
-
-                // Aktif etkinliğe tıklandıysa sonraki adıma geç
+              element?.addEventListener('click', () => {
                 setTimeout(() => driverObj.moveNext(), 400);
-              });
+              }, { once: true });
             }
           },
           { 
@@ -78,7 +77,7 @@ export default function Home() {
             onHighlightStarted: (element: any) => {
               element?.addEventListener('click', () => {
                 setTimeout(() => driverObj.moveNext(), 400);
-              });
+              }, { once: true });
             }
           },
           { 
@@ -101,7 +100,7 @@ export default function Home() {
             onHighlightStarted: (element: any) => {
               element?.addEventListener('click', () => {
                 setTimeout(() => driverObj.moveNext(), 400);
-              });
+              }, { once: true });
             }
           },
           { 
@@ -167,10 +166,28 @@ export default function Home() {
       const { data: slots } = await supabase
         .from('etkinlik_ayarlari')
         .select('*')
-        .order('is_active', { ascending: false })
-        .order('slot_id', { ascending: true });
+        .eq('is_active', true)
+        .order('is_featured', { ascending: false })
+        .order('id', { ascending: false });
       
-      if (slots) setEventSlots(slots);
+      if (slots) {
+        const validActiveSlots: any[] = [];
+        for (const s of slots) {
+          if (isEventPast(s.event_date)) {
+            await supabase
+              .from('etkinlik_ayarlari')
+              .update({ is_active: false, is_registration_open: false })
+              .eq('id', s.id);
+          } else {
+            validActiveSlots.push(s);
+          }
+        }
+        setEventSlots(validActiveSlots);
+        if (selectedEvent) {
+          const updatedSelected = validActiveSlots.find((s: any) => s.id === selectedEvent.id);
+          if (updatedSelected) setSelectedEvent(updatedSelected);
+        }
+      }
       setLoading(false);
     };
     
@@ -178,38 +195,39 @@ export default function Home() {
 
     const settingsChannel = supabase
       .channel('realtime_event_settings')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'etkinlik_ayarlari' }, fetchInitialData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'etkinlik_ayarlari' }, fetchInitialData)
       .subscribe();
 
     const seatsChannel = supabase
       .channel('realtime_seats')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'katilimcilar' }, async () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'katilimcilar' }, async () => {
         if (!selectedEvent) return;
         const { data } = await supabase
           .from('katilimcilar')
           .select('koltuk_no')
           .eq('etkinlik_id', selectedEvent.id)
           .not('koltuk_no', 'is', null);
-        setOccupiedSeats(data?.map(p => p.koltuk_no) || []);
+        setOccupiedSeats(data?.map((p: any) => p.koltuk_no) || []);
       }).subscribe();
 
     return () => {
       supabase.removeChannel(settingsChannel);
       supabase.removeChannel(seatsChannel);
     };
-  }, [selectedEvent]);
+  }, [selectedEvent?.id]);
 
   const handleBiletVerisiniGuncelle = async (user: any) => {
+    const generatedQr = user.qr_kodu || crypto.randomUUID();
     const { data, error: updateError } = await supabase
       .from('katilimcilar')
-      .update({ bilet_alindi_mi: true })
+      .update({ bilet_alindi_mi: true, qr_kodu: generatedQr })
       .eq('id', user.id)
       .select('qr_kodu, koltuk_no')
       .single();
       
     if (!updateError && data) {
-      setQrValue(data.qr_kodu);
-      setSelectedSeat(data.koltuk_no);
+      setQrValue(data.qr_kodu || generatedQr);
+      setSelectedSeat(data.koltuk_no ?? user.koltuk_no ?? null);
       setStep(3);
     } else {
       setError("Bilet bilgileri güncellenirken hata oluştu.");
@@ -231,7 +249,8 @@ export default function Home() {
         return;
       }
 
-      const { data, error: supabaseError } = await supabase
+      // Önce etkinlik_id = selectedEvent.id olarak ara, bulunamazsa geriye dönük slot_id ile kontrol et
+      let { data, error: supabaseError } = await supabase
         .from('katilimcilar')
         .select('*')
         .ilike('ad_soyad', temizAd)
@@ -240,6 +259,19 @@ export default function Home() {
         .maybeSingle();
 
       if (supabaseError) throw supabaseError;
+
+      if (!data && selectedEvent.slot_id && selectedEvent.slot_id !== selectedEvent.id) {
+        const fallbackRes = await supabase
+          .from('katilimcilar')
+          .select('*')
+          .ilike('ad_soyad', temizAd)
+          .eq('telefon', temizTel)
+          .eq('etkinlik_id', Number(selectedEvent.slot_id))
+          .maybeSingle();
+        if (fallbackRes.data) {
+          data = fallbackRes.data;
+        }
+      }
 
       if (!data) {
         setError(`${selectedEvent.event_name || 'Bu etkinlik'} için kayıt bulunamadı. Lütfen bilgilerinizi kontrol edin.`);
@@ -262,7 +294,7 @@ export default function Home() {
           .select('koltuk_no')
           .eq('etkinlik_id', selectedEvent.id)
           .not('koltuk_no', 'is', null);
-        setOccupiedSeats(allParticipants?.map(p => p.koltuk_no) || []);
+        setOccupiedSeats(allParticipants?.map((p: any) => p.koltuk_no) || []);
         setStep(2);
       }
     } catch (err) { 
@@ -280,15 +312,18 @@ export default function Home() {
     try {
       const { error: updateError } = await supabase
         .from('katilimcilar')
-        .update({ koltuk_no: selectedSeat })
-        .eq('id', currentUserData.id)
-        .eq('etkinlik_id', selectedEvent.id);
+        .update({ koltuk_no: selectedSeat, etkinlik_id: selectedEvent.id })
+        .eq('id', currentUserData.id);
 
       if (updateError) {
         if (updateError.code === '23505') {
           setError("Maalesef bu koltuk az önce başkası tarafından seçildi.");
-          const { data } = await supabase.from('katilimcilar').select('koltuk_no').eq('etkinlik_id', selectedEvent.id).not('koltuk_no', 'is', null);
-          setOccupiedSeats(data?.map(p => p.koltuk_no) || []);
+          const { data } = await supabase
+            .from('katilimcilar')
+            .select('koltuk_no')
+            .eq('etkinlik_id', selectedEvent.id)
+            .not('koltuk_no', 'is', null);
+          setOccupiedSeats(data?.map((p: any) => p.koltuk_no) || []);
         } else { 
           setError("Koltuk rezerve edilemedi."); 
         }
@@ -306,20 +341,47 @@ export default function Home() {
     const canvas = document.getElementById("ticket-qr") as HTMLCanvasElement;
     if (!canvas) return;
     const qrImage = canvas.toDataURL("image/png");
-    
+
+    // UTF-8 Türkçe karakter desteği için Roboto fontunu yüklemeyi dene
+    let hasTurkishFont = false;
+    try {
+      const fontRes = await fetch("https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/fonts/Roboto/Roboto-Medium.ttf");
+      if (fontRes.ok) {
+        const fontBuffer = await fontRes.arrayBuffer();
+        const bytes = new Uint8Array(fontBuffer);
+        let binary = "";
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64Font = window.btoa(binary);
+        doc.addFileToVFS("Roboto-Medium.ttf", base64Font);
+        doc.addFont("Roboto-Medium.ttf", "Roboto", "normal");
+        doc.addFont("Roboto-Medium.ttf", "Roboto", "bold");
+        doc.setFont("Roboto", "bold");
+        hasTurkishFont = true;
+      }
+    } catch {
+      hasTurkishFont = false;
+    }
+
+    const formatPdfText = (t: string) => hasTurkishFont ? t : toSafeAscii(t);
+
     doc.setFillColor(10, 15, 30); doc.rect(0, 0, 210, 297, 'F');
     doc.saveGraphicsState(); doc.setGState(new (doc as any).GState({ opacity: 0.07 }));
     doc.setFillColor(59, 135, 245); doc.roundedRect(20, 30, 170, 240, 15, 15, 'F');
     doc.restoreGraphicsState(); doc.saveGraphicsState(); doc.setGState(new (doc as any).GState({ opacity: 0.15 }));
     doc.setDrawColor(59, 130, 246); doc.setLineWidth(0.5); doc.roundedRect(20, 30, 170, 240, 15, 15, 'S');
     doc.restoreGraphicsState();
-    doc.setTextColor(255, 255, 255); doc.setFontSize(28); doc.setFont("helvetica", "bold"); doc.text("FLICK BILET", 105, 55, { align: "center" });
+    doc.setTextColor(255, 255, 255); doc.setFontSize(28);
+    if (!hasTurkishFont) doc.setFont("helvetica", "bold");
+    doc.text(formatPdfText("FLICK BİLET"), 105, 55, { align: "center" });
     doc.saveGraphicsState(); doc.setGState(new (doc as any).GState({ opacity: 0.1 }));
     doc.setFillColor(59, 130, 246); doc.roundedRect(40, 70, 130, 45, 10, 10, 'F');
     doc.restoreGraphicsState();
-    doc.setTextColor(255, 255, 255); doc.setFontSize(22); doc.text(userDisplayName.toUpperCase(), 105, 88, { align: "center" });
+    doc.setTextColor(255, 255, 255); doc.setFontSize(20);
+    doc.text(formatPdfText(userDisplayName.toLocaleUpperCase('tr-TR')), 105, 88, { align: "center" });
     doc.setFontSize(12); doc.setTextColor(150, 150, 150); doc.text("KOLTUK NO:", 105, 96, { align: "center" });
-    doc.setFontSize(20); doc.setTextColor(59, 130, 246); doc.text(selectedSeat || "---", 105, 106, { align: "center" });
+    doc.setFontSize(20); doc.setTextColor(59, 130, 246); doc.text(selectedSeat || formatPdfText("GENEL GİRİŞ"), 105, 106, { align: "center" });
     doc.saveGraphicsState(); doc.setGState(new (doc as any).GState({ opacity: 0.95 }));
     doc.setFillColor(255, 255, 255); doc.roundedRect(65, 130, 80, 80, 10, 10, 'F');
     doc.addImage(qrImage, 'PNG', 70, 135, 70, 70);
@@ -327,10 +389,13 @@ export default function Home() {
     doc.setDrawColor(255, 255, 255); doc.saveGraphicsState(); doc.setGState(new (doc as any).GState({ opacity: 0.1 }));
     doc.line(40, 230, 170, 230);
     doc.restoreGraphicsState();
-    doc.setTextColor(255, 255, 255); doc.setFontSize(11); doc.text(selectedEvent?.event_name || "", 105, 245, { align: "center" });
-    doc.setFontSize(9); doc.setTextColor(160, 160, 160); doc.text(`${selectedEvent?.event_date}  •  ${selectedEvent?.event_location}`, 105, 255, { align: "center" });
+    doc.setTextColor(255, 255, 255); doc.setFontSize(11);
+    doc.text(formatPdfText(selectedEvent?.event_name || ""), 105, 245, { align: "center" });
+    doc.setFontSize(9); doc.setTextColor(160, 160, 160);
+    const { locationName: pdfLocationName } = unpackEventLocation(selectedEvent);
+    doc.text(formatPdfText(`${formatEventDateDisplay(selectedEvent?.event_date)}  •  ${pdfLocationName}`), 105, 255, { align: "center" });
     
-    doc.save(`${userDisplayName}_Flick_Bilet.pdf`);
+    doc.save(`${toSafeAscii(userDisplayName)}_Flick_Bilet.pdf`);
   };
 
   return (
@@ -338,14 +403,13 @@ export default function Home() {
       <header className="w-full max-w-2xl py-8 mb-2 text-center z-50 flex flex-col items-center justify-center">
         <div className="space-y-1">
           <h2 className="text-blue-500 font-bold text-[10px] tracking-[0.3em] uppercase italic">
-            ANKARA MEDIPOL SINEMA VE TIYATRO TOPLUGU
+            ANKARA MEDIPOL SINEMA VE TIYATRO TOPLULUGU
           </h2>
           <h1 className="text-3xl font-black tracking-tighter flex items-center justify-center gap-2 text-white">
             FLICK <span className="text-white">BILET</span>
           </h1>
         </div>
 
-        {/* YUKARIYA TAŞINAN SADE NASIL KULLANILIR BUTONU */}
         <button
           type="button"
           onClick={startTutorial}
@@ -398,21 +462,25 @@ export default function Home() {
                   />
                 </div>
                 
-                {/* Step 1'deyken Yeni Kayıt Butonunu göster */}
+                {/* Step 1'deyken yalnızca kayıtlar açıksa Yeni Kayıt Butonunu göster */}
                 {step === 1 && (
                   <div className="pt-6 border-t border-white/5 text-center">
-                    <p className="text-[10px] text-slate-500 mb-4 uppercase font-black tracking-widest italic">Henüz Kayıt Yapmadınız mı?</p>
-                    
-                    {/* Tur Adımı 2: Yeni Kayıt Butonu */}
-                    <button 
-                      id="step-new-reg-btn"
-                      onClick={() => setStep(4)}
-                      className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl flex items-center justify-center gap-2 transition-all font-bold text-xs uppercase shadow-lg shadow-blue-500/20 active:scale-95"
-                    >
-                      <UserPlus size={16} /> Yeni Kayıt Oluştur
-                    </button>
+                    {selectedEvent?.is_registration_open !== false && (
+                      <>
+                        <p className="text-[10px] text-slate-500 mb-4 uppercase font-black tracking-widest italic">Henüz Kayıt Yapmadınız mı?</p>
+                        
+                        {/* Tur Adımı 2: Yeni Kayıt Butonu */}
+                        <button 
+                          id="step-new-reg-btn"
+                          onClick={() => setStep(4)}
+                          className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl flex items-center justify-center gap-2 transition-all font-bold text-xs uppercase shadow-lg shadow-blue-500/20 active:scale-95 mb-4"
+                        >
+                          <UserPlus size={16} /> Yeni Kayıt Oluştur
+                        </button>
+                      </>
+                    )}
 
-                    <button onClick={() => setStep(0)} className="mt-4 w-full text-slate-600 text-[10px] font-black uppercase hover:text-white transition-colors flex items-center justify-center gap-2">
+                    <button onClick={() => setStep(0)} className="w-full text-slate-600 text-[10px] font-black uppercase hover:text-white transition-colors flex items-center justify-center gap-2">
                       <ArrowLeft size={12} /> Etkinlik Listesine Dön
                     </button>
                   </div>
@@ -457,7 +525,7 @@ export default function Home() {
                 loading={loading}
                 setStep={setStep}
                 setError={setError}
-                seatLayout={eventSlots.find(s => s.slot_id === selectedEvent?.slot_id)?.seat_layout || []}
+                seatLayout={eventSlots.find(s => s.id === selectedEvent?.id)?.seat_layout || selectedEvent?.seat_layout || []}
               />
             )}
 
@@ -469,12 +537,23 @@ export default function Home() {
                   selectedSeat={selectedSeat}
                   qrValue={qrValue}
                   indirPDF={indirPDF}
+                  selectedEvent={selectedEvent}
                 />
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {/* Sağ alt köşede sadece ikondan oluşan minimal Admin Paneli giriş butonu */}
+      <Link
+        href="/admin"
+        title="Yönetici Paneli"
+        aria-label="Yönetici Paneli"
+        className="fixed bottom-4 right-4 z-50 p-2.5 rounded-2xl bg-slate-900/60 border border-white/10 text-slate-500 hover:text-blue-400 hover:border-blue-500/40 hover:bg-slate-900 opacity-40 hover:opacity-100 backdrop-blur-md transition-all active:scale-95"
+      >
+        <ShieldCheck size={16} />
+      </Link>
 
       <style jsx global>{`
         @keyframes scroll-left { from { transform: translateX(0); } to { transform: translateX(-50%); } }

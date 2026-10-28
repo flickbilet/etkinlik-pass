@@ -13,7 +13,7 @@ export default function NewRegistration({
   whatsappLink,
 }: { 
   onSuccess: (data: any) => void,
-  selectedEventId: string,
+  selectedEventId: string | number,
   whatsappLink?: string,
 }) {
   const [loading, setLoading] = useState(false);
@@ -43,7 +43,7 @@ export default function NewRegistration({
       try {
         const { data, error } = await supabase
           .from('etkinlik_ayarlari')
-          .select('event_price, event_iban, event_ibanname, is_paid, is_registration_open')
+          .select('id, slot_id, event_price, event_iban, event_ibanname, is_paid, is_registration_open')
           .eq('id', selectedEventId)
           .single();
 
@@ -95,6 +95,11 @@ export default function NewRegistration({
         type: 'magiclink'
       });
       if (error) throw error;
+
+      // GÜVENLİK DÜZELTMESİ: Katılımcı e-postasını doğruladıktan hemen sonra 
+      // geçici Supabase Auth oturumunu kapatıyoruz ki /admin paneline yetkisiz erişim oluşmasın.
+      await supabase.auth.signOut();
+
       setEmailVerified(true);
       setErrorMessage(null);
     } catch (error: any) {
@@ -134,6 +139,8 @@ export default function NewRegistration({
     const isPaid = eventSettings?.is_paid === true || String(eventSettings?.is_paid) === "true";
     if (isPaid && !file) return setErrorMessage("Lütfen ödeme dekontunu yükleyin!");
 
+    const targetEventId = Number(selectedEventId);
+
     setLoading(true);
     try {
       const { data: existingUser, error: checkError } = await supabase
@@ -141,16 +148,16 @@ export default function NewRegistration({
         .select('onayli_mi')
         .ilike('ad_soyad', cleanAdSoyad)
         .eq('telefon', cleanTelefon)
-        .eq('etkinlik_id', selectedEventId)
+        .eq('etkinlik_id', targetEventId)
         .maybeSingle();
 
       if (checkError) throw checkError;
 
       if (existingUser) {
         if (existingUser.onayli_mi === false) {
-          setErrorMessage("böyle bir kayıt zaten var, onay bekliyor.");
+          setErrorMessage("Böyle bir kayıt zaten var, onay bekliyor.");
         } else {
-          setErrorMessage("böyle bir kayıt var. biletinizi alabilirsiniz");
+          setErrorMessage("Böyle bir kayıt var, biletinizi alabilirsiniz.");
         }
         setLoading(false);
         return; 
@@ -163,7 +170,8 @@ export default function NewRegistration({
           ad_soyad: cleanAdSoyad,
           email: cleanEmail,
           telefon: cleanTelefon,
-          etkinlik_id: selectedEventId,
+          etkinlik_id: targetEventId,
+          qr_kodu: crypto.randomUUID(),
           onayli_mi: false,
           geldi_mi: false,
           bilet_alindi_mi: false
@@ -432,7 +440,7 @@ export default function NewRegistration({
             <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-2xl flex items-center gap-3 text-amber-200 text-xs animate-in zoom-in duration-300">
               <Info size={20} className="text-amber-400 shrink-0" />
               <span className="font-semibold leading-relaxed">
-                Gruba katıldıktan sonra başvurunuzu tamamlamak için aşağıdaki <strong className="text-white underline">"KAYDI TAMAMLA"</strong> butonuna basmayı unutmayın!
+                Gruba katıldıktan sonra başvurunuzu tamamlamak için aşağıdaki <strong className="text-white underline">&quot;KAYDI TAMAMLA&quot;</strong> butonuna basmayı unutmayın!
               </span>
               <ArrowDownRight size={18} className="text-amber-400 animate-bounce shrink-0 ml-auto" />
             </div>

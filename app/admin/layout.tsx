@@ -1,14 +1,13 @@
 "use client";
-import { useState, useEffect, createContext, useContext } from 'react';
+import { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
-  Users, Lock, Plus, Camera, ShieldCheck, 
-  Settings2, LayoutGrid, X, Power, Film, Theater, Trophy, 
-  Calendar, MapPin, Loader2, Save, Armchair, Link2,
-  CreditCard, Banknote, User, ClipboardList, Sparkles
+  Lock, ShieldCheck, CalendarRange, ClipboardList, 
+  Loader2, LogOut, ExternalLink, AlertCircle
 } from 'lucide-react';
+import { isEventPast } from '@/lib/dateUtils';
 
 const AdminContext = createContext<any>(null);
 export const useAdmin = () => useContext(AdminContext);
@@ -16,132 +15,101 @@ export const useAdmin = () => useContext(AdminContext);
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAuthLoading, setIsAuthLoading] = useState(true); // YENİ: Oturum kontrolü yapılırken ekran titremesini önler
-  const [email, setEmail] = useState(""); // YENİ: Supabase için e-posta
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [session, setSession] = useState<any>(null);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [participants, setParticipants] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [loginLoading, setLoginLoading] = useState(false);
 
-  // --- SLOT YÖNETİMİ STATE'LERİ ---
-  const [eventSlots, setEventSlots] = useState<any[]>([]);
-  const [selectedSlotId, setSelectedSlotId] = useState<number>(1); 
-  const [savingSlotId, setSavingSlotId] = useState<string | null>(null);
+  // Dinamik etkinlik listesi
+  const [events, setEvents] = useState<any[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(true);
 
-  // --- YENİLİK: KOLTUK DÜZENLEYİCİ STATE'LERİ ---
-  const [isSeatEditorOpen, setIsSeatEditorOpen] = useState(false);
-  const [editingSlotForSeats, setEditingSlotForSeats] = useState<any>(null);
-  const [activeSeats, setActiveSeats] = useState<string[]>([]);
-  const [savingSeats, setSavingSeats] = useState(false);
-  
-  // --- DRAG TO SELECT İÇİN YENİ STATE ---
-  const [isDragging, setIsDragging] = useState(false);
-  
-  const seatRows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P'].reverse();
-  const seatCols = Array.from({ length: 25 }, (_, i) => i + 1);
-
-  const fetchEventSlots = async () => {
-    const { data } = await supabase
-      .from('etkinlik_ayarlari')
-      .select('*')
-      .order('slot_id', { ascending: true });
-    if (data) setEventSlots(data);
+  const isEmailAuthorized = (userEmail?: string) => {
+    if (!userEmail) return false;
+    const allowedEnv = process.env.NEXT_PUBLIC_ADMIN_EMAILS;
+    if (!allowedEnv || allowedEnv.trim() === "") return true;
+    const allowedList = allowedEnv
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    return allowedList.length === 0 || allowedList.includes(userEmail.toLowerCase());
   };
 
-  const updateLocalSlot = (id: string, field: string, value: any) => {
-    setEventSlots(prev => prev.map(slot => {
-      if (slot.id === id) {
-        if (field === 'is_active' && value === false) {
-          return { 
-            ...slot, 
-            is_active: false,
-            event_name: "Çok Yakında",
-            event_date: "bilinmiyor",
-            event_location: "bilinmiyor"
-          };
-        }
-        return { ...slot, [field]: value };
-      }
-      return slot;
-    }));
-  };
-
-  const handleUpdateSlot = async (slot: any) => {
-    setSavingSlotId(slot.id);
-    const { error } = await supabase
-      .from('etkinlik_ayarlari')
-      .update({
-        event_name: slot.event_name,
-        event_date: slot.event_date,
-        event_location: slot.event_location,
-        event_type: slot.event_type,
-        is_active: slot.is_active,
-        has_seating: slot.has_seating,
-        whatsapp_link: slot.whatsapp_link,
-        is_paid: slot.is_paid,
-        event_price: slot.event_price,
-        event_iban: slot.event_iban,
-        event_ibanname: slot.event_ibanname,
-        is_registration_open: slot.is_registration_open, // YENİLİK: Kayıt durumu veritabanına gönderiliyor
-        is_featured: slot.is_featured // YENİLİK: Özel Etkinlik durumu veritabanına gönderiliyor
-      })
-      .eq('id', slot.id);
-
-    if (error) alert("Hata: " + error.message);
-    setSavingSlotId(null);
-  };
-
-  const handleSaveSeats = async () => {
-    if (!editingSlotForSeats) return;
-    setSavingSeats(true);
-    
-    const { error } = await supabase
-      .from('etkinlik_ayarlari')
-      .update({ seat_layout: activeSeats })
-      .eq('id', editingSlotForSeats.id);
-
-    if (!error) {
-      updateLocalSlot(editingSlotForSeats.id, 'seat_layout', activeSeats);
-      setIsSeatEditorOpen(false);
-    } else {
-      alert("Hata: " + error.message);
-    }
-    setSavingSeats(false);
-  };
-
-  const toggleSeat = (seatId: string) => {
-    setActiveSeats(prev => 
-      prev.includes(seatId) ? prev.filter(s => s !== seatId) : [...prev, seatId]
-    );
-  };
-
-  const fetchParticipants = async () => {
-    setLoading(true);
+  const fetchEvents = useCallback(async () => {
+    setLoadingEvents(true);
     const { data, error } = await supabase
-      .from('katilimcilar')
+      .from('etkinlik_ayarlari')
       .select('*')
-      .eq('etkinlik_id', selectedSlotId)
-      .order('ad_soyad', { ascending: true });
-    if (!error && data) setParticipants(data);
-    setLoading(false);
-  };
+      .order('is_active', { ascending: false })
+      .order('is_featured', { ascending: false })
+      .order('id', { ascending: false });
+
+    if (!error && data) {
+      // Tarihi geçmiş aktif etkinlikleri otomatik olarak arşive (is_active: false) aktar
+      const processedEvents = await Promise.all(
+        data.map(async (ev: any) => {
+          if (ev.is_active && isEventPast(ev.event_date)) {
+            await supabase
+              .from('etkinlik_ayarlari')
+              .update({ is_active: false, is_registration_open: false })
+              .eq('id', ev.id);
+            return { ...ev, is_active: false, is_registration_open: false };
+          }
+          return ev;
+        })
+      );
+      setEvents(processedEvents);
+    }
+    setLoadingEvents(false);
+  }, []);
 
   useEffect(() => {
-    if (isAuthenticated) fetchParticipants();
-  }, [selectedSlotId, isAuthenticated]);
+    const verifySession = async (currentSession: any) => {
+      if (!currentSession?.user) {
+        setSession(null);
+        setIsAuthenticated(false);
+        setIsAuthLoading(false);
+        return;
+      }
 
-  // --- SUPABASE AUTH KONTROLÜ (YENİLENEN KISIM) ---
-  useEffect(() => {
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setIsAuthenticated(!!session);
+      // 1. GÜVENLİK KONTROLÜ: Katılımcıların bilet kaydı OTP oturumuyla admin paneline sızmasını engelle.
+      // Admin oturumu kesinlikle admin e-postası ve şifresi (password) ile açılmış olmalıdır.
+      const amr = currentSession.user.amr;
+      if (Array.isArray(amr) && amr.length > 0) {
+        const hasPasswordAuth = amr.some((item: any) => item?.method === 'password');
+        if (!hasPasswordAuth) {
+          await supabase.auth.signOut();
+          setSession(null);
+          setIsAuthenticated(false);
+          setAuthError("Bu oturum admin yetkisine sahip değil. Lütfen admin şifrenizle giriş yapın.");
+          setIsAuthLoading(false);
+          return;
+        }
+      }
+
+      // 2. GÜVENLİK KONTROLÜ: İzin verilen admin e-posta kontrolü
+      if (!isEmailAuthorized(currentSession.user.email)) {
+        await supabase.auth.signOut();
+        setSession(null);
+        setIsAuthenticated(false);
+        setAuthError("Bu e-posta adresi admin paneli için yetkili değil.");
+        setIsAuthLoading(false);
+        return;
+      }
+
+      setSession(currentSession);
+      setIsAuthenticated(true);
       setIsAuthLoading(false);
     };
-    
-    checkSession();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      setIsAuthenticated(!!session);
+    supabase.auth.getSession().then(({ data: { session: initSession } }: any) => {
+      verifySession(initSession);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event: any, newSession: any) => {
+      verifySession(newSession);
     });
 
     return () => {
@@ -149,27 +117,40 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     };
   }, []);
 
-  // --- SUPABASE GİRİŞ YAPMA (YENİLENEN KISIM) ---
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchEvents();
+    }
+  }, [isAuthenticated, fetchEvents]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) alert("Giriş başarısız: " + error.message);
+    setAuthError(null);
+    setLoginLoading(true);
+    try {
+      if (!isEmailAuthorized(email.trim())) {
+        setAuthError("Bu e-posta adresi admin girişi için yetkili değil.");
+        return;
+      }
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (error) {
+        setAuthError("Giriş başarısız: " + error.message);
+      }
+    } finally {
+      setLoginLoading(false);
+    }
   };
 
-  // --- SUPABASE ÇIKIŞ YAPMA (YENİLENEN KISIM) ---
   const handleLogout = async () => { 
-    await supabase.auth.signOut(); 
+    await supabase.auth.signOut();
+    setSession(null);
+    setIsAuthenticated(false);
   };
 
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    fetchEventSlots();
-  }, [isAuthenticated]);
-
-  // YENİ: Oturum kontrol edilirken boş bir ekran göstererek "Giriş" ekranının saliselik görünmesini engeller
   if (isAuthLoading) {
     return (
       <main className="min-h-screen bg-[#020617] flex items-center justify-center">
@@ -178,18 +159,28 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }
 
-  // YENİLENEN GİRİŞ EKRANI (E-posta + Şifre)
   if (!isAuthenticated) {
     return (
       <main className="min-h-screen bg-[#020617] flex items-center justify-center p-6 text-white">
-        <div className="w-full max-w-md bg-slate-900/40 border border-white/5 p-10 rounded-[2.5rem] text-center">
-          <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6"><Lock size={32} /></div>
-          <h1 className="text-2xl font-black mb-8">Flick Admin</h1>
+        <div className="w-full max-w-md bg-slate-900/40 border border-white/10 p-10 rounded-[2.5rem] text-center shadow-2xl backdrop-blur-xl">
+          <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-600/30">
+            <Lock size={32} />
+          </div>
+          <h1 className="text-2xl font-black uppercase tracking-tight mb-2">Flick Admin</h1>
+          <p className="text-xs text-slate-400 font-bold mb-6">Etkinlik ve Bilet Yönetim Sistemi</p>
+
+          {authError && (
+            <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-400 text-xs font-bold flex items-center gap-2 text-left">
+              <AlertCircle size={18} className="shrink-0" />
+              <span>{authError}</span>
+            </div>
+          )}
+
           <form onSubmit={handleLogin} className="space-y-4">
             <input 
               type="email" 
-              placeholder="E-posta Adresi" 
-              className="w-full bg-slate-950 border border-white/10 p-5 rounded-2xl outline-none text-center" 
+              placeholder="Admin E-posta Adresi" 
+              className="w-full bg-slate-950 border border-white/10 p-5 rounded-2xl outline-none text-center focus:border-blue-500/50 transition-colors" 
               value={email} 
               onChange={(e) => setEmail(e.target.value)} 
               autoFocus 
@@ -198,13 +189,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <input 
               type="password" 
               placeholder="Şifre" 
-              className="w-full bg-slate-950 border border-white/10 p-5 rounded-2xl outline-none text-center" 
+              className="w-full bg-slate-950 border border-white/10 p-5 rounded-2xl outline-none text-center focus:border-blue-500/50 transition-colors" 
               value={password} 
               onChange={(e) => setPassword(e.target.value)} 
               required 
             />
-            <button type="submit" className="w-full bg-blue-600 p-5 rounded-2xl font-bold uppercase text-xs tracking-widest hover:bg-blue-500 transition-colors">
-              Giriş Yap
+            <button 
+              type="submit" 
+              disabled={loginLoading}
+              className="w-full bg-blue-600 p-5 rounded-2xl font-bold uppercase text-xs tracking-widest hover:bg-blue-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {loginLoading ? <Loader2 className="animate-spin" size={18} /> : "Giriş Yap"}
             </button>
           </form>
         </div>
@@ -212,327 +207,82 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }
 
+  const isEventsRoute = pathname === '/admin' || pathname?.startsWith('/admin/events');
+  const isSurveyRoute = pathname === '/admin/survey';
+
   return (
     <AdminContext.Provider value={{
-      participants, setParticipants, fetchParticipants, loading, setLoading,
-      eventSlots, selectedSlotId,
-      isAuthenticated
+      events,
+      setEvents,
+      fetchEvents,
+      loadingEvents,
+      isAuthenticated,
+      session
     }}>
-      <main className="min-h-screen bg-[#020617] text-white p-4 font-sans flex flex-col items-center">
-        
-        {isSeatEditorOpen && editingSlotForSeats && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-2 sm:p-6 bg-black/95 backdrop-blur-xl animate-in fade-in duration-300">
-            <div className="w-full max-w-6xl bg-slate-950 border border-white/10 rounded-[2.5rem] flex flex-col max-h-[95vh] overflow-hidden shadow-2xl">
-              <div className="flex justify-between items-center p-6 sm:p-8 border-b border-white/5 bg-slate-950/50 backdrop-blur-md">
-                <div>
-                  <h2 className="text-xl font-black uppercase tracking-tighter text-white">
-                    Koltuk Düzeni <span className="text-blue-500">(Slot #{editingSlotForSeats.slot_id})</span>
-                  </h2>
-                  <p className="text-[10px] text-slate-500 font-bold tracking-widest">
-                    MÜŞTERİLERİN SEÇEBİLECEĞİ AKTİF KOLTUKLARA TIKLAYARAK VEYA SÜRÜKLEYEREK BELİRLEYİN
-                  </p>
-                </div>
-                <button 
-                  onClick={() => setIsSeatEditorOpen(false)} 
-                  className="bg-slate-900 p-3 rounded-2xl hover:bg-rose-500/20 hover:text-rose-500 transition-all text-white"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-auto p-4 sm:p-8 custom-scrollbar bg-[#020617]">
-                <div 
-                  className="min-w-max flex flex-col gap-2 mx-auto pb-8"
-                  onMouseUp={() => setIsDragging(false)}
-                  onMouseLeave={() => setIsDragging(false)}
-                >
-                   <div className="flex gap-2 items-center mb-4">
-                      <div className="w-6"></div>
-                      {seatCols.map(col => (
-                         <div key={`head-${col}`} className="w-8 text-center text-[10px] font-black text-slate-600">{col}</div>
-                      ))}
-                   </div>
-                   
-                  {seatRows.map(row => (
-                    <div key={row} className="flex gap-2 items-center">
-                      <div className="w-6 text-center text-xs font-bold text-slate-500">{row}</div>
-                      {seatCols.map(col => {
-                        const seatId = `${row}-${col}`;
-                        const isActive = activeSeats.includes(seatId);
-                        return (
-                          <button
-                            key={seatId}
-                            onMouseDown={() => {
-                              setIsDragging(true);
-                              toggleSeat(seatId);
-                            }}
-                            onMouseEnter={() => {
-                              if (isDragging) {
-                                toggleSeat(seatId);
-                              }
-                            }}
-                            className={`w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold transition-all select-none ${
-                              isActive 
-                                ? 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.4)] scale-105 z-10' 
-                                : 'bg-slate-800/50 text-slate-500 hover:bg-slate-700 hover:text-white'
-                            }`}
-                          >
-                            {col}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ))}
-                  
-                  <div className="w-full mt-10 relative flex justify-center">
-                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-dashed border-slate-700"></div></div>
-                    <div className="relative bg-[#020617] px-4 text-[10px] font-black tracking-[0.5em] text-slate-500">PERDE / SAHNE</div>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="p-6 border-t border-white/5 bg-slate-950/50 backdrop-blur-md flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-4 text-xs font-bold text-slate-400">
-                  <span>Toplam Aktif Koltuk: <span className="text-emerald-500 text-lg ml-1">{activeSeats.length}</span></span>
-                  <div className="h-6 w-[1px] bg-white/10 hidden sm:block"></div>
-                  <button 
-                    onClick={() => setActiveSeats([])} 
-                    className="text-rose-500 hover:text-rose-400 text-[10px] uppercase tracking-widest hidden sm:block"
-                  >
-                    Tümünü Temizle
-                  </button>
-                </div>
-                <button 
-                  disabled={savingSeats}
-                  onClick={handleSaveSeats}
-                  className="bg-emerald-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest hover:bg-emerald-500 transition-all flex items-center gap-2 w-full sm:w-auto justify-center"
-                >
-                  {savingSeats ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
-                  KAYDET VE KAPAT
-                </button>
-              </div>
-
+      <main className="min-h-screen bg-[#020617] text-white p-4 md:p-8 font-sans flex flex-col items-center">
+        {/* Üst Navigasyon Barı */}
+        <header className="w-full max-w-6xl flex flex-wrap justify-between items-center gap-4 bg-slate-900/50 p-4 sm:p-5 rounded-[2rem] border border-white/10 mb-8 backdrop-blur-xl shadow-xl">
+          <Link href="/admin" className="flex items-center gap-3 group">
+            <div className="bg-blue-600 p-2.5 rounded-2xl shadow-lg shadow-blue-600/20 group-hover:scale-105 transition-transform">
+              <ShieldCheck size={24} />
             </div>
-          </div>
-        )}
-
-        {isSettingsOpen && (
-          <div className="fixed inset-0 z-[150] flex items-center justify-center p-2 sm:p-6 bg-black/95 backdrop-blur-xl">
-            <div className="w-full max-w-5xl bg-slate-950 border border-white/10 rounded-[2.5rem] sm:rounded-[3rem] flex flex-col max-h-[92vh] overflow-hidden shadow-2xl">
-              <div className="flex justify-between items-center p-6 sm:p-8 border-b border-white/5 bg-slate-950/50 backdrop-blur-md">
-                <div>
-                  <h2 className="text-xl font-black uppercase tracking-tighter">Etkinlik Slotları</h2>
-                  <p className="text-[10px] text-slate-500 font-bold tracking-widest">AKTİF SLOTLARI DÜZENLE</p>
-                </div>
-                <button onClick={() => setIsSettingsOpen(false)} className="bg-slate-900 p-3 rounded-2xl hover:bg-rose-500/20 hover:text-rose-500 transition-all">
-                  <X size={24} />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-                  {eventSlots.map((slot) => (
-                    <div key={slot.id} className={`p-5 sm:p-6 rounded-[2rem] border transition-all duration-500 ${slot.is_active ? (slot.is_featured ? 'bg-gradient-to-b from-amber-500/10 via-slate-900/60 to-slate-900/40 border-amber-500/50 shadow-[0_0_25px_rgba(245,158,11,0.15)]' : 'bg-slate-900/40 border-blue-500/30') : 'bg-slate-900/10 border-white/5 opacity-60'}`}>
-                      
-                      {/* ÖZEL ETKİNLİK BUTONU */}
-                      <div className="mb-4">
-                        <button
-                          type="button"
-                          onClick={() => updateLocalSlot(slot.id, 'is_featured', !slot.is_featured)}
-                          className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border ${
-                            slot.is_featured 
-                              ? 'bg-amber-500/20 border-amber-500/50 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]' 
-                              : 'bg-slate-950 border-white/5 text-slate-500 hover:text-slate-300'
-                          }`}
-                        >
-                          <span className="flex items-center gap-2">
-                            <Sparkles size={14} className={slot.is_featured ? 'text-amber-400 animate-pulse' : 'text-slate-600'} />
-                            ÖZEL ETKİNLİK VURGUSU
-                          </span>
-                          <span className={`px-2.5 py-1 rounded-lg text-[8px] font-black ${
-                            slot.is_featured ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
-                          }`}>
-                            {slot.is_featured ? 'EVET (ÖNE ÇIKAN)' : 'HAYIR (NORMAL)'}
-                          </span>
-                        </button>
-                      </div>
-
-                      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-                        <span className="text-[10px] font-black bg-blue-600/20 text-blue-500 px-3 py-1 rounded-lg">SLOT #{slot.slot_id}</span>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button 
-                            onClick={() => updateLocalSlot(slot.id, 'has_seating', !slot.has_seating)}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[8px] font-black transition-all ${slot.has_seating ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-500'}`}
-                          >
-                            <Armchair size={12} /> {slot.has_seating ? 'KOLTUK AÇIK' : 'KOLTUK KAPALI'}
-                          </button>
-                          
-                          {slot.has_seating && (
-                            <button
-                              onClick={() => {
-                                setEditingSlotForSeats(slot);
-                                setActiveSeats(slot.seat_layout || []);
-                                setIsSeatEditorOpen(true);
-                              }}
-                              className="flex items-center gap-2 px-3 py-2 rounded-xl text-[8px] font-black transition-all bg-amber-500 text-slate-900 hover:bg-amber-400"
-                            >
-                              <LayoutGrid size={12} /> DÜZENLE
-                            </button>
-                          )}
-
-                          <button 
-                            onClick={() => updateLocalSlot(slot.id, 'is_active', !slot.is_active)}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[8px] font-black transition-all ${slot.is_active ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-400'}`}
-                          >
-                            <Power size={14} /> {slot.is_active ? 'AKTİF' : 'PASİF'}
-                          </button>
-
-                          {/* YENİLİK: Kayıtları Açma / Kapatma Butonu */}
-                          <button 
-                            onClick={() => updateLocalSlot(slot.id, 'is_registration_open', !slot.is_registration_open)}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[8px] font-black transition-all ${slot.is_registration_open ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400'}`}
-                          >
-                            <User size={12} /> {slot.is_registration_open ? 'KAYIT AÇIK' : 'KAYIT KAPALI'}
-                          </button>
-                          
-                        </div>
-                      </div>
-
-                      <div className={`space-y-4 ${!slot.is_active && 'pointer-events-none opacity-50'}`}>
-                        <button 
-                          onClick={() => updateLocalSlot(slot.id, 'is_paid', !slot.is_paid)}
-                          className={`w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-[9px] font-black transition-all border ${slot.is_paid ? 'bg-amber-600/10 border-amber-600/20 text-amber-500' : 'bg-emerald-600/10 border-emerald-600/20 text-emerald-500'}`}
-                        >
-                          {slot.is_paid ? 'ÜCRETLİ ETKİNLİK (DEKONT İSTER)' : 'ÜCRETSİZ ETKİNLİK (DEKONT İSTEMEZ)'}
-                        </button>
-
-                        {slot.is_paid && (
-                          <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
-                            <div className="relative">
-                              <User className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500/50" size={14} />
-                              <input 
-                                placeholder="Hesap Sahibi Adı Soyadı" 
-                                className="w-full bg-slate-950 border border-amber-500/20 p-4 pl-10 rounded-2xl text-[10px] font-bold outline-none focus:border-amber-500/50 text-white " 
-                                value={slot.event_ibanname || ''} 
-                                onChange={(e) => updateLocalSlot(slot.id, 'event_ibanname', e.target.value)} 
-                              />
-                            </div>
-                            
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                              <div className="relative col-span-1">
-                                <Banknote className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500/50" size={14} />
-                                <input 
-                                  placeholder="Fiyat (TL)" 
-                                  type="number"
-                                  className="w-full bg-slate-950 border border-amber-500/20 p-4 pl-10 rounded-2xl text-[10px] font-bold outline-none focus:border-amber-500/50 text-white" 
-                                  value={slot.event_price || ''} 
-                                  onChange={(e) => updateLocalSlot(slot.id, 'event_price', e.target.value)} 
-                                />
-                              </div>
-                              <div className="relative col-span-2">
-                                <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500/50" size={14} />
-                                <input 
-                                  placeholder="Ödeme IBAN Bilgisi" 
-                                  className="w-full bg-slate-950 border border-amber-500/20 p-4 pl-10 rounded-2xl text-[10px] font-bold outline-none focus:border-amber-500/50 text-white" 
-                                  value={slot.event_iban || ''} 
-                                  onChange={(e) => updateLocalSlot(slot.id, 'event_iban', e.target.value)} 
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="grid grid-cols-4 gap-2">
-                          {[
-                            { id: 'cinema', icon: <Film size={16}/> },
-                            { id: 'theater', icon: <Theater size={16}/> },
-                            { id: 'social', icon: <Users size={16}/> },
-                            { id: 'quiz', icon: <Trophy size={16}/> }
-                          ].map((t) => (
-                            <button
-                              key={t.id}
-                              onClick={() => updateLocalSlot(slot.id, 'event_type', t.id)}
-                              className={`p-3 rounded-xl flex flex-col items-center gap-1 border transition-all ${slot.event_type === t.id ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-950 border-white/5 text-slate-500'}`}
-                            >
-                              {t.icon}
-                              <span className="text-[8px] font-bold uppercase">{t.id}</span>
-                            </button>
-                          ))}
-                        </div>
-
-                        <input placeholder="Etkinlik Adı" className="w-full bg-slate-950 border border-white/5 p-4 rounded-2xl text-xs font-bold outline-none focus:border-blue-500/50" value={slot.event_name || ''} onChange={(e) => updateLocalSlot(slot.id, 'event_name', e.target.value)} />
-                        
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="relative">
-                            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
-                            <input placeholder="Tarih" className="w-full bg-slate-950 border border-white/5 p-4 pl-10 rounded-2xl text-[10px] font-bold outline-none" value={slot.event_date || ''} onChange={(e) => updateLocalSlot(slot.id, 'event_date', e.target.value)} />
-                          </div>
-                          <div className="relative">
-                            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
-                            <input placeholder="Konum" className="w-full bg-slate-950 border border-white/5 p-4 pl-10 rounded-2xl text-[10px] font-bold outline-none" value={slot.event_location || ''} onChange={(e) => updateLocalSlot(slot.id, 'event_location', e.target.value)} />
-                          </div>
-                        </div>
-                        
-                        <div className="relative">
-                          <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
-                          <input placeholder="WhatsApp Grup Linki" className="w-full bg-slate-950 border border-white/5 p-4 pl-10 rounded-2xl text-[10px] font-bold outline-none" value={slot.whatsapp_link || ''} onChange={(e) => updateLocalSlot(slot.id, 'whatsapp_link', e.target.value)} />
-                        </div>
-                      </div>
-
-                      <button 
-                        disabled={savingSlotId === slot.id}
-                        onClick={() => handleUpdateSlot(slot)}
-                        className="w-full bg-white text-black p-4 rounded-2xl font-black text-[10px] tracking-widest mt-6 hover:bg-blue-600 hover:text-white transition-all flex items-center justify-center gap-2"
-                      >
-                        {savingSlotId === slot.id ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
-                        GÜNCELLE
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            <div>
+              <h1 className="text-lg font-black uppercase tracking-tight leading-none">Flick Admin</h1>
+              <span className="text-[10px] text-slate-400 font-bold truncate block max-w-[180px] sm:max-w-xs mt-1">
+                {session?.user?.email || "Yönetim Paneli"}
+              </span>
             </div>
-          </div>
-        )}
+          </Link>
 
-        <div className="w-full max-w-lg flex justify-between items-center bg-slate-900/40 p-5 rounded-[2rem] border border-white/5 mb-4 backdrop-blur-xl">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-600 p-2 rounded-xl"><ShieldCheck size={24} /></div>
-            <div><h1 className="text-lg font-bold uppercase">Flick Admin</h1><button onClick={handleLogout} className="text-[10px] text-rose-500 font-bold uppercase">Çıkış</button></div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => setIsSettingsOpen(true)} className="bg-slate-800 p-3 rounded-2xl text-blue-400"><Settings2 size={22} /></button>
-            <Link href="/admin/add" className={`${pathname === '/admin/add' ? 'bg-emerald-600' : 'bg-slate-800'} p-3 rounded-2xl`}><Plus size={22} /></Link>
-            <Link href="/admin/list" className={`${pathname === '/admin/list' ? 'bg-blue-600' : 'bg-slate-800'} p-3 rounded-2xl relative`}><Users size={22} /></Link>
-            
-            {/* YENİLİK: ANKET BUTONU EKLEDİĞİMİZ KISIM */}
-            <Link href="/admin/survey" className={`${pathname === '/admin/survey' ? 'bg-purple-600' : 'bg-slate-800'} p-3 rounded-2xl`}>
-              <ClipboardList size={22} />
-            </Link>
-
-            <Link href="/admin/scanner" className={`${pathname === '/admin/scanner' ? 'bg-blue-600' : 'bg-slate-800'} p-3 rounded-2xl`}><Camera size={22} /></Link>
-            <Link href="/admin/pending" className={`${pathname === '/admin/pending' ? 'bg-blue-600' : 'bg-slate-800'} p-3 rounded-2xl`}><ShieldCheck size={20} /></Link>
-          </div>
-        </div>
-
-        <div className="w-full max-w-lg grid grid-cols-4 gap-2 mb-6">
-          {[1, 2, 3, 4].map((num) => (
-            <button 
-              key={num}
-              onClick={() => setSelectedSlotId(num)}
-              className={`py-3 rounded-2xl border transition-all flex flex-col items-center justify-center gap-1 ${
-                selectedSlotId === num 
-                ? 'bg-blue-600 border-blue-400 shadow-[0_0_15px_rgba(37,99,235,0.3)] scale-105 z-10' 
-                : 'bg-slate-900/40 border-white/5 text-slate-500 hover:bg-slate-800'
+          <div className="flex flex-wrap items-center gap-2">
+            <Link 
+              href="/admin" 
+              className={`flex items-center gap-2 px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all ${
+                isEventsRoute 
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' 
+                  : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
-              <LayoutGrid size={14} className={selectedSlotId === num ? 'text-white' : 'text-slate-600'} />
-              <span className="text-[9px] font-black uppercase">Slot {num}</span>
-            </button>
-          ))}
-        </div>
+              <CalendarRange size={18} />
+              <span>Etkinlikler</span>
+            </Link>
 
-        <div className="w-full max-w-lg flex flex-col gap-6">
+            {false && (
+              <Link 
+                href="/admin/survey" 
+                className={`flex items-center gap-2 px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all ${
+                  isSurveyRoute 
+                    ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/25' 
+                    : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <ClipboardList size={18} />
+                <span>Anket</span>
+              </Link>
+            )}
+
+            <Link 
+              href="/" 
+              target="_blank"
+              className="flex items-center gap-1.5 px-3.5 py-3 rounded-2xl text-xs font-bold bg-slate-800/50 text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+              title="Kullanıcı Sitesini Aç"
+            >
+              <ExternalLink size={16} />
+              <span className="hidden sm:inline text-[11px] uppercase font-black">Site</span>
+            </Link>
+
+            <button 
+              onClick={handleLogout} 
+              className="flex items-center gap-1.5 px-3.5 py-3 rounded-2xl text-xs font-black uppercase bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-600 hover:text-white transition-all"
+              title="Çıkış Yap"
+            >
+              <LogOut size={16} />
+              <span className="hidden sm:inline text-[11px]">Çıkış</span>
+            </button>
+          </div>
+        </header>
+
+        <div className="w-full max-w-6xl flex-1">
           {children}
         </div>
 
@@ -541,8 +291,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           #reader { border: none !important; }
           .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
           .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); border-radius: 10px; }
-          .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(16, 185, 129, 0.3); border-radius: 10px; }
-          .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(16, 185, 129, 0.6); }
+          .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(59, 130, 246, 0.3); border-radius: 10px; }
+          .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(59, 130, 246, 0.6); }
         `}</style>
       </main>
     </AdminContext.Provider>
