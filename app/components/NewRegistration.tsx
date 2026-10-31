@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { 
   User, Smartphone, Mail, School, Users, 
   MessageCircle, CheckCircle2, Loader2, Image as ImageIcon, ShieldCheck, KeyRound, Copy, CreditCard,
-  ChevronDown, AlertCircle, Info, ArrowDownRight
+  ChevronDown, AlertCircle, Info, ArrowDownRight, FileQuestion
 } from 'lucide-react';
 
 export default function NewRegistration({ 
@@ -37,18 +37,36 @@ export default function NewRegistration({
     referans: ''
   });
 
+  // Özel başvuru soruları state'leri
+  const [customQuestions, setCustomQuestions] = useState<any[]>([]);
+  const [formAnswers, setFormAnswers] = useState<Record<string, string>>({});
+
   useEffect(() => {
     async function getSettings() {
       if (!selectedEventId) return;
       try {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('etkinlik_ayarlari')
-          .select('id, slot_id, event_price, event_iban, event_ibanname, is_paid, is_registration_open')
+          .select('id, slot_id, event_price, event_iban, event_ibanname, is_paid, is_registration_open, custom_questions')
           .eq('id', selectedEventId)
           .single();
 
+        // Eğer custom_questions kolonu henüz eklenmemişse hata almadan eski kolonlarla tekrar çek
+        if (error && (error.message?.includes('custom_questions') || error.code === 'PGRST204')) {
+          const fallbackRes = await supabase
+            .from('etkinlik_ayarlari')
+            .select('id, slot_id, event_price, event_iban, event_ibanname, is_paid, is_registration_open')
+            .eq('id', selectedEventId)
+            .single();
+          data = fallbackRes.data;
+          error = fallbackRes.error;
+        }
+
         if (!error && data) {
           setEventSettings(data);
+          if (Array.isArray(data.custom_questions)) {
+            setCustomQuestions(data.custom_questions);
+          }
         }
       } catch (err) {
         setErrorMessage("Ayarlar çekilemedi.");
@@ -66,6 +84,7 @@ export default function NewRegistration({
     }
     return () => clearTimeout(timer);
   }, [countdown]);
+
 
   const handleSendOTP = async () => {
     if (!formData.email.includes('@')) return setErrorMessage("Lütfen geçerli bir e-posta giriniz!");
@@ -136,6 +155,18 @@ export default function NewRegistration({
     if (!waJoined || countdown > 0) return setErrorMessage("Lütfen önce WhatsApp grubuna katılın!");
     if (cleanTelefon.length !== 10) return setErrorMessage("Telefon numarası 10 hane olmalıdır!");
     
+    // Özel soru zorunluluk kontrolleri
+    if (customQuestions && customQuestions.length > 0) {
+      for (const q of customQuestions) {
+        if (q.required) {
+          const ans = formAnswers[q.id]?.trim();
+          if (!ans) {
+            return setErrorMessage(`Lütfen "${q.label || 'Zorunlu soruyu'}" yanıtlayınız!`);
+          }
+        }
+      }
+    }
+
     const isPaid = eventSettings?.is_paid === true || String(eventSettings?.is_paid) === "true";
     if (isPaid && !file) return setErrorMessage("Lütfen ödeme dekontunu yükleyin!");
 
@@ -143,15 +174,117 @@ export default function NewRegistration({
 
     setLoading(true);
     try {
-      const { data: existingUser, error: checkError } = await supabase
+      // 1. Katılımcı profilini kontrol et ve oluştur/güncelle
+      let katilimciId: number | null = null;
+      const { data: existingMember } = await supabase
+        .from('katilimcilar')
+        .select('id, ad_soyad, email, okul, referans')
+        .eq('telefon', cleanTelefon)
+        .maybeSingle();
+
+      if (existingMember) {
+        katilimciId = existingMember.id;
+        await supabase
+          .from('katilimcilar')
+          .update({
+            ad_soyad: cleanAdSoyad,
+            email: cleanEmail,
+            okul: formData.okul.trim() || existingMember.okul,
+            referans: formData.referans.trim() || existingMember.referans,
+          })
+          .eq('id', katilimciId);
+      } else {
+        const { data: newMember } = await supabase
+          .from('katilimcilar')
+          .insert([{
+            telefon: cleanTelefon,
+            ad_soyad: cleanAdSoyad,
+            email: cleanEmail,
+            okul: formData.okul.trim(),
+            referans: formData.referans.trim(),
+          }])
+          .select()
+          .maybeSingle();
+
+        if (newMember) katilimciId = newMember.id;
+      }
+
+      // 2. Bu etkinlik için daha önce bilet kaydı oluşturulmuş mu?
+      if (katilimciId) {
+        const { data: existingTicket } = await supabase
+          .from('biletler')
+          .select('id, onayli_mi')
+          .eq('etkinlik_id', targetEventId)
+          .eq('katilimci_id', katilimciId)
+          .maybeSingle();
+
+        if (existingTicket) {
+          if (existingTicket.onayli_mi === false) {
+            setErrorMessage("Bu etkinlik için zaten kaydınız var, onay bekliyor.");
+          } else {
+            setErrorMessage("Bu etkinlik için kaydınız var, biletinizi alabilirsiniz.");
+          }
+          setLoading(false);
+          return;
+        }
+
+        const generatedQr = crypto.randomUUID();
+        const ticketPayload: any = {
+          etkinlik_id: targetEventId,
+          katilimci_id: katilimciId,
+          qr_kodu: generatedQr,
+          onayli_mi: false,
+          geldi_mi: false,
+          bilet_alindi_mi: false,
+        };
+
+        if (Object.keys(formAnswers).length > 0) {
+          ticketPayload.form_answers = formAnswers;
+        }
+
+        let { data: ticket, error: ticketError } = await supabase
+          .from('biletler')
+          .insert([ticketPayload])
+          .select()
+          .single();
+
+        // Eğer form_answers sütunu veritabanına henüz eklenmemişse hata vermeden kaydı tamamla
+        if (ticketError && (ticketError.message?.includes('form_answers') || ticketError.code === 'PGRST204')) {
+          delete ticketPayload.form_answers;
+          const retry = await supabase
+            .from('biletler')
+            .insert([ticketPayload])
+            .select()
+            .single();
+          ticket = retry.data;
+          ticketError = retry.error;
+        }
+
+        if (ticketError) throw ticketError;
+
+        let uploadedDekontUrl: string | null = null;
+        if (file && ticket) {
+          uploadedDekontUrl = await handleFileUpload(ticket.id);
+          if (uploadedDekontUrl) {
+            await supabase
+              .from('biletler')
+              .update({ dekont_url: uploadedDekontUrl })
+              .eq('id', ticket.id);
+          }
+        }
+
+        onSuccess(ticket);
+        return;
+      }
+
+      // 3. Fallback: eski yöntem
+      const { data: existingUser } = await supabase
         .from('katilimcilar')
         .select('onayli_mi')
         .ilike('ad_soyad', cleanAdSoyad)
         .eq('telefon', cleanTelefon)
         .eq('etkinlik_id', targetEventId)
         .maybeSingle();
-
-      if (checkError) throw checkError;
 
       if (existingUser) {
         if (existingUser.onayli_mi === false) {
@@ -413,6 +546,92 @@ export default function NewRegistration({
             </div>
           )}
         </div>
+
+        {/* ÖZEL BAŞVURU SORULARI (GOOGLE FORMS MODELİ) */}
+        {customQuestions && customQuestions.length > 0 && (
+          <div className="space-y-4 pt-2 animate-in fade-in duration-300">
+            <div className="flex items-center gap-2 px-1">
+              <FileQuestion size={18} className="text-purple-400" />
+              <h3 className="text-xs font-black uppercase tracking-wider text-purple-300">
+                Etkinlik Başvuru Soruları
+              </h3>
+            </div>
+
+            <div className="space-y-3">
+              {customQuestions.map((q: any, qIdx: number) => {
+                const qValue = formAnswers[q.id] || '';
+                return (
+                  <div 
+                    key={q.id || qIdx}
+                    className="p-4 rounded-2xl bg-white/5 border border-white/10 hover:border-purple-500/30 transition-all space-y-2.5"
+                  >
+                    <label className="block text-xs font-bold text-slate-200 leading-snug">
+                      <span className="text-purple-400 font-black mr-1.5">{qIdx + 1}.</span>
+                      {q.label}
+                      {q.required && (
+                        <span className="text-rose-400 font-black ml-1.5" title="Zorunlu Soru">*</span>
+                      )}
+                    </label>
+
+                    {q.type === 'textarea' ? (
+                      <textarea
+                        rows={3}
+                        required={q.required}
+                        placeholder={q.placeholder || 'Yanıtınızı buraya yazınız...'}
+                        value={qValue}
+                        onChange={(e) => setFormAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                        className="w-full bg-slate-950/70 border border-white/10 rounded-xl p-3 text-xs text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-500 resize-none font-medium"
+                      />
+                    ) : q.type === 'radio' ? (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {(q.options && q.options.length > 0 ? q.options : ['Evet', 'Hayır']).map((opt: string, optIdx: number) => {
+                          const isSelected = qValue === opt;
+                          return (
+                            <button
+                              key={optIdx}
+                              type="button"
+                              onClick={() => setFormAnswers(prev => ({ ...prev, [q.id]: opt }))}
+                              className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'bg-purple-600 text-white border-purple-500 shadow-lg shadow-purple-600/30'
+                                  : 'bg-slate-950/70 text-slate-300 border-white/10 hover:border-white/20'
+                              }`}
+                            >
+                              {opt}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : q.type === 'select' ? (
+                      <select
+                        required={q.required}
+                        value={qValue}
+                        onChange={(e) => setFormAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                        className="w-full bg-slate-950/70 border border-white/10 rounded-xl p-3 text-xs text-white outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-500 font-medium cursor-pointer"
+                      >
+                        <option value="">-- Seçiniz --</option>
+                        {(q.options && q.options.length > 0 ? q.options : ['Evet', 'Hayır']).map((opt: string, optIdx: number) => (
+                          <option key={optIdx} value={opt} className="bg-slate-900 text-white">
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        required={q.required}
+                        placeholder={q.placeholder || 'Yanıtınız...'}
+                        value={qValue}
+                        onChange={(e) => setFormAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                        className="w-full bg-slate-950/70 border border-white/10 rounded-xl p-3 text-xs text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-500 font-medium"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {showPaymentInfo && (
           <div className="relative border-2 border-dashed border-white/10 rounded-2xl p-4 transition-all hover:bg-white/5 bg-white/2">

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
   Lock, ShieldCheck, CalendarRange, ClipboardList, 
-  Loader2, LogOut, ExternalLink, AlertCircle
+  Loader2, LogOut, ExternalLink, AlertCircle, Calendar
 } from 'lucide-react';
 import { isEventPast } from '@/lib/dateUtils';
 
@@ -74,22 +74,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         return;
       }
 
-      // 1. GÜVENLİK KONTROLÜ: Katılımcıların bilet kaydı OTP oturumuyla admin paneline sızmasını engelle.
-      // Admin oturumu kesinlikle admin e-postası ve şifresi (password) ile açılmış olmalıdır.
-      const amr = currentSession.user.amr;
-      if (Array.isArray(amr) && amr.length > 0) {
-        const hasPasswordAuth = amr.some((item: any) => item?.method === 'password');
-        if (!hasPasswordAuth) {
-          await supabase.auth.signOut();
-          setSession(null);
-          setIsAuthenticated(false);
-          setAuthError("Bu oturum admin yetkisine sahip değil. Lütfen admin şifrenizle giriş yapın.");
-          setIsAuthLoading(false);
-          return;
-        }
-      }
-
-      // 2. GÜVENLİK KONTROLÜ: İzin verilen admin e-posta kontrolü
+      // Güvenlik Kontrolü: İzin verilen admin e-posta kontrolü
       if (!isEmailAuthorized(currentSession.user.email)) {
         await supabase.auth.signOut();
         setSession(null);
@@ -104,9 +89,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       setIsAuthLoading(false);
     };
 
-    supabase.auth.getSession().then(({ data: { session: initSession } }: any) => {
-      verifySession(initSession);
-    });
+    supabase.auth.getSession()
+      .then(({ data, error }: any) => {
+        if (error) {
+          verifySession(null);
+        } else {
+          verifySession(data?.session);
+        }
+      })
+      .catch(() => {
+        verifySession(null);
+      });
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event: any, newSession: any) => {
       verifySession(newSession);
@@ -133,12 +126,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         return;
       }
 
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
       if (error) {
         setAuthError("Giriş başarısız: " + error.message);
+      } else if (data?.session) {
+        setSession(data.session);
+        setIsAuthenticated(true);
       }
     } finally {
       setLoginLoading(false);
@@ -245,6 +241,30 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             >
               <CalendarRange size={18} />
               <span>Etkinlikler</span>
+            </Link>
+
+            <Link 
+              href="/admin/calendar" 
+              className={`flex items-center gap-2 px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all ${
+                pathname === '/admin/calendar'
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' 
+                  : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <Calendar size={18} />
+              <span>Takvim</span>
+            </Link>
+
+            <Link 
+              href="/admin/members" 
+              className={`flex items-center gap-2 px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all ${
+                pathname === '/admin/members'
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' 
+                  : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <ClipboardList size={18} />
+              <span>Katılımcılar</span>
             </Link>
 
             {false && (

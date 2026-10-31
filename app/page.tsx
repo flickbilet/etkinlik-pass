@@ -200,6 +200,15 @@ export default function Home() {
 
     const seatsChannel = supabase
       .channel('realtime_seats')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'biletler' }, async () => {
+        if (!selectedEvent) return;
+        const { data } = await supabase
+          .from('biletler')
+          .select('koltuk_no')
+          .eq('etkinlik_id', selectedEvent.id)
+          .not('koltuk_no', 'is', null);
+        setOccupiedSeats(data?.map((p: any) => p.koltuk_no) || []);
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'katilimcilar' }, async () => {
         if (!selectedEvent) return;
         const { data } = await supabase
@@ -207,7 +216,9 @@ export default function Home() {
           .select('koltuk_no')
           .eq('etkinlik_id', selectedEvent.id)
           .not('koltuk_no', 'is', null);
-        setOccupiedSeats(data?.map((p: any) => p.koltuk_no) || []);
+        if (data && data.length > 0) {
+          setOccupiedSeats(data.map((p: any) => p.koltuk_no) || []);
+        }
       }).subscribe();
 
     return () => {
@@ -218,20 +229,19 @@ export default function Home() {
 
   const handleBiletVerisiniGuncelle = async (user: any) => {
     const generatedQr = user.qr_kodu || crypto.randomUUID();
-    const { data, error: updateError } = await supabase
-      .from('katilimcilar')
+    const targetTicketId = user.bilet_id || user.id;
+
+    const { data: biletRes } = await supabase
+      .from('biletler')
       .update({ bilet_alindi_mi: true, qr_kodu: generatedQr })
-      .eq('id', user.id)
+      .eq('id', targetTicketId)
       .select('qr_kodu, koltuk_no')
-      .single();
-      
-    if (!updateError && data) {
-      setQrValue(data.qr_kodu || generatedQr);
-      setSelectedSeat(data.koltuk_no ?? user.koltuk_no ?? null);
-      setStep(3);
-    } else {
-      setError("Bilet bilgileri güncellenirken hata oluştu.");
-    }
+      .maybeSingle();
+
+    const data = biletRes || user;
+    setQrValue(data.qr_kodu || generatedQr);
+    setSelectedSeat(data.koltuk_no ?? user.koltuk_no ?? null);
+    setStep(3);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -249,52 +259,116 @@ export default function Home() {
         return;
       }
 
-      // Önce etkinlik_id = selectedEvent.id olarak ara, bulunamazsa geriye dönük slot_id ile kontrol et
-      let { data, error: supabaseError } = await supabase
+      // 1. Yeni biletler + katilimcilar tablosundan sorgula
+      let bilet: any = null;
+      let katilimci: any = null;
+
+      const { data: memberData } = await supabase
         .from('katilimcilar')
         .select('*')
         .ilike('ad_soyad', temizAd)
         .eq('telefon', temizTel)
-        .eq('etkinlik_id', Number(selectedEvent.id))
         .maybeSingle();
 
-      if (supabaseError) throw supabaseError;
+      if (memberData) {
+        katilimci = memberData;
+        const targetEventIds = [Number(selectedEvent.id)];
+        if (selectedEvent.slot_id && selectedEvent.slot_id !== selectedEvent.id) {
+          targetEventIds.push(Number(selectedEvent.slot_id));
+        }
 
-      if (!data && selectedEvent.slot_id && selectedEvent.slot_id !== selectedEvent.id) {
-        const fallbackRes = await supabase
+        const { data: ticketData } = await supabase
+          .from('biletler')
+          .select('*')
+          .eq('katilimci_id', memberData.id)
+          .in('etkinlik_id', targetEventIds)
+          .maybeSingle();
+
+        if (ticketData) {
+          bilet = ticketData;
+        }
+      }
+
+      // 2. Geriye dönük uyumluluk: eski katilimcilar tablosu kontrolü
+      if (!bilet) {
+        let { data: legacyData } = await supabase
           .from('katilimcilar')
           .select('*')
           .ilike('ad_soyad', temizAd)
           .eq('telefon', temizTel)
-          .eq('etkinlik_id', Number(selectedEvent.slot_id))
+          .eq('etkinlik_id', Number(selectedEvent.id))
           .maybeSingle();
-        if (fallbackRes.data) {
-          data = fallbackRes.data;
+
+        if (!legacyData && selectedEvent.slot_id && selectedEvent.slot_id !== selectedEvent.id) {
+          const fallbackRes = await supabase
+            .from('katilimcilar')
+            .select('*')
+            .ilike('ad_soyad', temizAd)
+            .eq('telefon', temizTel)
+            .eq('etkinlik_id', Number(selectedEvent.slot_id))
+            .maybeSingle();
+          if (fallbackRes.data) {
+            legacyData = fallbackRes.data;
+          }
+        }
+
+        if (legacyData && legacyData.etkinlik_id) {
+          bilet = legacyData;
+          katilimci = legacyData;
         }
       }
 
-      if (!data) {
+      if (!bilet) {
         setError(`${selectedEvent.event_name || 'Bu etkinlik'} için kayıt bulunamadı. Lütfen bilgilerinizi kontrol edin.`);
         return; 
       } 
 
-      if (data.onayli_mi === false) {
+      // GÖLGE BAN (SHADOW BAN): Kullanıcı yasaklıysa 'sen yasaklandın' denmez, onay bekliyor gibi gösterilir
+      const isUserBanned = 
+        katilimci?.is_banned === true || 
+        bilet?.is_banned === true ||
+        (typeof katilimci?.referans === 'string' && katilimci.referans.includes('[YASAKLI]')) ||
+        (typeof bilet?.referans === 'string' && bilet.referans.includes('[YASAKLI]'));
+
+      if (isUserBanned || bilet.onayli_mi === false) {
         setError("Kaydınız sisteme ulaştı ancak henüz onaylanmadı. Lütfen onay bekleyin.");
         return;
       }
       
-      setCurrentUserData(data);
-      setUserDisplayName(data.ad_soyad);
+      const combinedData = {
+        ...bilet,
+        id: bilet.id,
+        bilet_id: bilet.id,
+        katilimci_id: katilimci?.id || bilet.katilimci_id,
+        ad_soyad: katilimci?.ad_soyad || temizAd,
+        telefon: katilimci?.telefon || temizTel,
+        email: katilimci?.email || bilet.email,
+      };
+
+      setCurrentUserData(combinedData);
+      setUserDisplayName(combinedData.ad_soyad);
       
-      if (data.koltuk_no || selectedEvent.has_seating === false) { 
-        await handleBiletVerisiniGuncelle(data); 
+      if (bilet.koltuk_no || selectedEvent.has_seating === false) { 
+        await handleBiletVerisiniGuncelle(combinedData); 
       } else {
-        const { data: allParticipants } = await supabase
-          .from('katilimcilar')
+        let occupied: string[] = [];
+        const { data: biletSeats } = await supabase
+          .from('biletler')
           .select('koltuk_no')
           .eq('etkinlik_id', selectedEvent.id)
           .not('koltuk_no', 'is', null);
-        setOccupiedSeats(allParticipants?.map((p: any) => p.koltuk_no) || []);
+
+        if (biletSeats && biletSeats.length > 0) {
+          occupied = biletSeats.map((p: any) => p.koltuk_no);
+        } else {
+          const { data: allParticipants } = await supabase
+            .from('katilimcilar')
+            .select('koltuk_no')
+            .eq('etkinlik_id', selectedEvent.id)
+            .not('koltuk_no', 'is', null);
+          occupied = allParticipants?.map((p: any) => p.koltuk_no) || [];
+        }
+        setOccupiedSeats(occupied);
         setStep(2);
       }
     } catch (err) { 
@@ -310,16 +384,23 @@ export default function Home() {
     setLoading(true);
     setError("");
     try {
+      const targetTicketId = currentUserData.bilet_id || currentUserData.id;
+
       const { error: updateError } = await supabase
+        .from('biletler')
+        .update({ koltuk_no: selectedSeat, etkinlik_id: selectedEvent.id })
+        .eq('id', targetTicketId);
+
+      await supabase
         .from('katilimcilar')
         .update({ koltuk_no: selectedSeat, etkinlik_id: selectedEvent.id })
-        .eq('id', currentUserData.id);
+        .eq('id', currentUserData.id); // fallback
 
       if (updateError) {
         if (updateError.code === '23505') {
           setError("Maalesef bu koltuk az önce başkası tarafından seçildi.");
           const { data } = await supabase
-            .from('katilimcilar')
+            .from('biletler')
             .select('koltuk_no')
             .eq('etkinlik_id', selectedEvent.id)
             .not('koltuk_no', 'is', null);
@@ -328,7 +409,7 @@ export default function Home() {
           setError("Koltuk rezerve edilemedi."); 
         }
       } else { 
-        await handleBiletVerisiniGuncelle(currentUserData); 
+        await handleBiletVerisiniGuncelle({ ...currentUserData, koltuk_no: selectedSeat }); 
       }
     } finally {
       setLoading(false);

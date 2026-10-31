@@ -12,11 +12,12 @@ import {
   Save, Trash2, Edit3, Armchair, FileText, ExternalLink, X, Check, 
   GraduationCap, UserCheck2, Copy, FileUp, Loader2, Film, Theater, 
   Trophy, Calendar, MapPin, Link2, Sparkles, Power, User, CreditCard, 
-  Banknote, LayoutGrid, Download, Archive, ArchiveRestore, UserCheck
+  Banknote, LayoutGrid, Download, Archive, ArchiveRestore, UserCheck,
+  ShieldAlert, Ban, FileQuestion, HelpCircle, ListPlus, AlignLeft, Plus
 } from 'lucide-react';
 import { buildEventDateTime, splitEventDateTime, formatEventDateDisplay, isEventPast, packEventLocation, unpackEventLocation } from '@/lib/dateUtils';
 
-type TabType = 'list' | 'pending' | 'add' | 'scanner' | 'settings';
+type TabType = 'list' | 'pending' | 'banned' | 'add' | 'scanner' | 'settings';
 
 const SEAT_ROWS = ['P', 'O', 'N', 'M', 'L', 'K', 'J', 'I', 'H', 'G', 'F', 'E', 'D', 'C', 'B', 'A'];
 const SEAT_COLS = Array.from({ length: 25 }, (_, i) => i + 1);
@@ -95,6 +96,34 @@ function EventManagementContent() {
   const [rawDate, setRawDate] = useState("");
   const [rawTime, setRawTime] = useState("21:00");
 
+  // --- ÖZEL BAŞVURU SORULARI (GOOGLE FORMS TARZI) STATE'LERİ ---
+  const [customQuestions, setCustomQuestions] = useState<any[]>([]);
+  const [viewingAnswersPerson, setViewingAnswersPerson] = useState<any | null>(null);
+
+  const handleAddQuestion = () => {
+    const newQ = {
+      id: 'q_' + Date.now(),
+      label: '',
+      type: 'textarea', // 'textarea' | 'text' | 'radio' | 'select'
+      options: ['Evet', 'Hayır'],
+      required: true,
+      placeholder: '',
+    };
+    setCustomQuestions(prev => [...prev, newQ]);
+  };
+
+  const handleUpdateQuestion = (index: number, field: string, value: any) => {
+    setCustomQuestions(prev => {
+      const copy = [...prev];
+      copy[index] = { ...copy[index], [field]: value };
+      return copy;
+    });
+  };
+
+  const handleRemoveQuestion = (index: number) => {
+    setCustomQuestions(prev => prev.filter((_, i) => i !== index));
+  };
+
   useEffect(() => {
     scanStatusRef.current = scanStatus.status;
   }, [scanStatus.status]);
@@ -136,6 +165,7 @@ function EventManagementContent() {
 
       setEvent(data);
       setActiveSeats(data.seat_layout || []);
+      setCustomQuestions(Array.isArray(data.custom_questions) ? data.custom_questions : []);
     }
     setLoadingEvent(false);
   }, [eventId]);
@@ -151,6 +181,49 @@ function EventManagementContent() {
       idsToMatch.push(Number(targetEv.slot_id));
     }
 
+    // 1. Yeni 'biletler' tablosundan sorgula ve 'katilimcilar' ile birleştir
+    const { data: tickets, error: ticketError } = await supabase
+      .from('biletler')
+      .select('*')
+      .in('etkinlik_id', idsToMatch);
+
+    if (!ticketError && tickets) {
+      const katilimciIds = [...new Set(tickets.map((t: any) => t.katilimci_id).filter(Boolean))];
+      let memberMap = new Map();
+      if (katilimciIds.length > 0) {
+        const { data: members } = await supabase
+          .from('katilimcilar')
+          .select('*')
+          .in('id', katilimciIds);
+        if (members) {
+          memberMap = new Map(members.map((m: any) => [m.id, m]));
+        }
+      }
+
+      const merged = tickets.map((t: any) => {
+        const m = memberMap.get(t.katilimci_id) || {};
+        return {
+          ...t,
+          id: t.id,
+          bilet_id: t.id,
+          katilimci_id: m.id || t.katilimci_id,
+          ad_soyad: m.ad_soyad || 'Bilinmiyor',
+          telefon: m.telefon || '',
+          email: m.email || '',
+          okul: m.okul || '',
+          referans: m.referans || '',
+          is_banned: m.is_banned === true || (typeof m.referans === 'string' && m.referans.includes('[YASAKLI]')),
+          form_answers: t.form_answers || {},
+        };
+      });
+
+      merged.sort((a: any, b: any) => (a.ad_soyad || '').localeCompare(b.ad_soyad || '', 'tr'));
+      setParticipants(merged);
+      setLoadingParticipants(false);
+      return;
+    }
+
+    // 2. Geriye dönük uyumluluk: migration öncesi katilimcilar tablosu
     const { data, error } = await supabase
       .from('katilimcilar')
       .select('*')
@@ -158,7 +231,11 @@ function EventManagementContent() {
       .order('ad_soyad', { ascending: true });
 
     if (!error && data) {
-      setParticipants(data);
+      const processed = data.map((p: any) => ({
+        ...p,
+        is_banned: p.is_banned === true || (typeof p.referans === 'string' && p.referans.includes('[YASAKLI]')),
+      }));
+      setParticipants(processed);
     }
     setLoadingParticipants(false);
   }, [eventId, event]);
@@ -258,32 +335,53 @@ function EventManagementContent() {
             const cleanCode = decodedText.trim();
             if (window.navigator.vibrate) window.navigator.vibrate(100);
 
-            const { data: user, error } = await supabase
-              .from('katilimcilar')
+            // Önce biletler tablosundan bilet ve katılımcı sorgulayalım
+            let ticket: any = null;
+            let ticketUserName = 'Katılımcı';
+
+            const { data: biletData } = await supabase
+              .from('biletler')
               .select('*')
               .eq('qr_kodu', cleanCode)
               .in('etkinlik_id', idsToMatch)
               .maybeSingle();
 
-            if (error || !user) {
-              setScanStatus({ status: 'error', message: 'Bu Etkinlik İçin Geçersiz QR Kod!' });
-            } else if (user.onayli_mi === false) {
-              setScanStatus({ status: 'error', message: `${user.ad_soyad} Kaydı Henüz Onaylanmamış!` });
-            } else if (user.geldi_mi) {
-              setScanStatus({ status: 'warning', message: `${user.ad_soyad} Zaten İçeride!` });
-            } else {
-              const { error: updateError } = await supabase
+            if (biletData) {
+              ticket = biletData;
+              const { data: katData } = await supabase
                 .from('katilimcilar')
-                .update({ geldi_mi: true })
-                .eq('id', user.id);
-
-              if (!updateError) {
-                setParticipants((prev) =>
-                  prev.map((p) => (p.id === user.id ? { ...p, geldi_mi: true } : p))
-                );
-                const seatInfo = user.koltuk_no ? ` (${user.koltuk_no})` : '';
-                setScanStatus({ status: 'success', message: `${user.ad_soyad}${seatInfo} Giriş Yaptı!` });
+                .select('ad_soyad')
+                .eq('id', biletData.katilimci_id)
+                .maybeSingle();
+              if (katData?.ad_soyad) ticketUserName = katData.ad_soyad;
+            } else {
+              // Geriye dönük uyumluluk: eski katilimcilar tablosu
+              const { data: oldData } = await supabase
+                .from('katilimcilar')
+                .select('*')
+                .eq('qr_kodu', cleanCode)
+                .in('etkinlik_id', idsToMatch)
+                .maybeSingle();
+              if (oldData) {
+                ticket = oldData;
+                ticketUserName = oldData.ad_soyad;
               }
+            }
+
+            if (!ticket) {
+              setScanStatus({ status: 'error', message: 'Bu Etkinlik İçin Geçersiz QR Kod!' });
+            } else if (ticket.onayli_mi === false) {
+              setScanStatus({ status: 'error', message: `${ticketUserName} Kaydı Henüz Onaylanmamış!` });
+            } else if (ticket.geldi_mi) {
+              setScanStatus({ status: 'warning', message: `${ticketUserName} Zaten İçeride!` });
+            } else {
+              await supabase.from('biletler').update({ geldi_mi: true }).eq('id', ticket.bilet_id || ticket.id);
+
+              setParticipants((prev) =>
+                prev.map((p) => (p.bilet_id === ticket.id || p.id === ticket.id ? { ...p, geldi_mi: true } : p))
+              );
+              const seatInfo = ticket.koltuk_no ? ` (${ticket.koltuk_no})` : '';
+              setScanStatus({ status: 'success', message: `${ticketUserName}${seatInfo} Giriş Yaptı!` });
             }
 
             setTimeout(() => {
@@ -307,10 +405,81 @@ function EventManagementContent() {
   }, [activeTab, isAuthenticated, event?.id]);
 
   // --- KATILIMCI İŞLEMLERİ ---
-  const approvedParticipants = participants.filter((p) => p.onayli_mi === true);
-  const pendingParticipants = participants.filter((p) => p.onayli_mi === false || p.onayli_mi === null);
+  const bannedParticipants = participants.filter((p) => p.is_banned === true);
+  const approvedParticipants = participants.filter((p) => p.onayli_mi === true && p.is_banned !== true);
+  const pendingParticipants = participants.filter((p) => (p.onayli_mi === false || p.onayli_mi === null) && p.is_banned !== true);
   const ticketedCount = approvedParticipants.filter((p) => p.bilet_alindi_mi === true).length;
   const arrivedCount = approvedParticipants.filter((p) => p.geldi_mi === true).length;
+
+  const handleToggleBan = async (person: any) => {
+    const targetMemberId = person.katilimci_id || person.id;
+    const newBannedState = !person.is_banned;
+    const confirmPrompt = newBannedState
+      ? `"${person.ad_soyad}" adlı katılımcıyı yasaklamak (banlamak) istiyor musunuz?\n\nKullanıcıya yasaklandığı söylenmeyecek, arayüzde onay bekliyor gibi görünmeye devam edecektir.`
+      : `"${person.ad_soyad}" adlı katılımcının yasağını kaldırmak istiyor musunuz?`;
+
+    if (!confirm(confirmPrompt)) return;
+
+    try {
+      let updateError: any = null;
+      const { error: banColErr } = await supabase
+        .from('katilimcilar')
+        .update({ is_banned: newBannedState })
+        .eq('id', targetMemberId);
+
+      if (banColErr && (banColErr.message?.includes('is_banned') || banColErr.code === 'PGRST204')) {
+        // Akıllı Fallback: is_banned sütunu henüz yoksa referans alanında [YASAKLI] bayrağı ile anında yasakla!
+        const currentRef = String(person.referans || '');
+        let newRef = currentRef;
+        if (newBannedState) {
+          if (!newRef.includes('[YASAKLI]')) {
+            newRef = `[YASAKLI] ${newRef}`.trim();
+          }
+        } else {
+          newRef = newRef.replace('[YASAKLI]', '').trim();
+        }
+
+        if (person.telefon) {
+          const { error: refErr } = await supabase
+            .from('katilimcilar')
+            .update({ referans: newRef })
+            .eq('telefon', person.telefon);
+          if (refErr) updateError = refErr;
+        } else {
+          const { error: refErr } = await supabase
+            .from('katilimcilar')
+            .update({ referans: newRef })
+            .eq('id', targetMemberId);
+          if (refErr) updateError = refErr;
+        }
+      } else if (banColErr) {
+        updateError = banColErr;
+      }
+
+      if (updateError) throw updateError;
+
+      // Yasaklanıyorsa bu etkinlikteki bilet onayını kaldır
+      if (newBannedState && (person.bilet_id || person.id)) {
+        const ticketId = person.bilet_id || person.id;
+        await supabase.from('biletler').update({ onayli_mi: false }).eq('id', ticketId);
+      }
+
+      setParticipants((prev) =>
+        prev.map((p) => {
+          if (p.katilimci_id === targetMemberId || p.id === person.id) {
+            return {
+              ...p,
+              is_banned: newBannedState,
+              onayli_mi: newBannedState ? false : p.onayli_mi,
+            };
+          }
+          return p;
+        })
+      );
+    } catch (err: any) {
+      alert("Yasaklama işlemi hatası: " + err.message);
+    }
+  };
 
   const filteredApprovedList = approvedParticipants.filter((p) => {
     const q = searchTerm.toLowerCase();
@@ -328,37 +497,44 @@ function EventManagementContent() {
 
   const handleUpdateParticipant = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await supabase
+    const cleanPhone = formatPhoneNumber(editingPerson.telefon);
+    const memberId = editingPerson.katilimci_id || editingPerson.id;
+    const ticketId = editingPerson.bilet_id || editingPerson.id;
+
+    // 1. Katılımcı profil bilgilerini güncelle
+    await supabase
       .from('katilimcilar')
       .update({
         ad_soyad: editingPerson.ad_soyad.trim(),
-        telefon: formatPhoneNumber(editingPerson.telefon),
+        telefon: cleanPhone,
         email: editingPerson.email?.trim() || null,
         okul: editingPerson.okul?.trim() || null,
       })
-      .eq('id', editingPerson.id);
+      .eq('id', memberId);
 
-    if (!error) {
-      setIsEditModalOpen(false);
-      fetchEventParticipants();
-    } else {
-      alert("Hata: " + error.message);
-    }
+    // 2. Bilet tablosunda koltuk bilgisini güncelle
+    await supabase
+      .from('biletler')
+      .update({
+        koltuk_no: editingPerson.koltuk_no || null,
+      })
+      .eq('id', ticketId);
+
+    setIsEditModalOpen(false);
+    fetchEventParticipants();
   };
 
   const deleteUser = async (id: number) => {
-    if (confirm("Bu katılımcı kaydı silinsin mi?")) {
-      const { error } = await supabase.from('katilimcilar').delete().eq('id', id);
-      if (!error) {
-        setParticipants((prev) => prev.filter((p) => p.id !== id));
-      }
+    if (confirm("Bu bilet kaydı silinsin mi? (Katılımcı üye kaydı korunur)")) {
+      await supabase.from('biletler').delete().eq('id', id);
+      setParticipants((prev) => prev.filter((p) => p.bilet_id !== id && p.id !== id));
     }
   };
 
   const resetSeatAndTicket = async (id: number) => {
     if (confirm("Katılımcının koltuk seçimi, bilet ve giriş durumu sıfırlansın mı?")) {
-      const { error } = await supabase
-        .from('katilimcilar')
+      await supabase
+        .from('biletler')
         .update({
           koltuk_no: null,
           bilet_alindi_mi: false,
@@ -366,7 +542,8 @@ function EventManagementContent() {
           qr_kodu: crypto.randomUUID(),
         })
         .eq('id', id);
-      if (!error) fetchEventParticipants();
+
+      fetchEventParticipants();
     }
   };
 
@@ -376,14 +553,14 @@ function EventManagementContent() {
       return;
     }
     const confirmText = prompt(
-      `"${event?.event_name}" etkinliğinin ${approvedParticipants.length} kişilik onaylı katılımcı listesini tamamen silmek için ONAYLIYORUM yazın:`
+      `"${event?.event_name}" etkinliğinin ${approvedParticipants.length} kişilik onaylı bilet listesini tamamen silmek için ONAYLIYORUM yazın:`
     );
     if (confirmText === "ONAYLIYORUM") {
       setLoadingParticipants(true);
       try {
-        const idsToDelete = approvedParticipants.map((p) => p.id);
-        const { error } = await supabase.from('katilimcilar').delete().in('id', idsToDelete);
-        if (error) throw error;
+        const idsToDelete = approvedParticipants.map((p) => p.bilet_id || p.id);
+        await supabase.from('biletler').delete().in('id', idsToDelete);
+        await supabase.from('katilimcilar').delete().in('id', idsToDelete); // fallback
         await fetchEventParticipants();
       } catch (err: any) {
         alert("Hata: " + err.message);
@@ -395,17 +572,27 @@ function EventManagementContent() {
 
   const exportToExcel = () => {
     if (approvedParticipants.length === 0) return alert("Dışa aktarılacak katılımcı yok.");
-    const rows = approvedParticipants.map((p, index) => ({
-      "#": index + 1,
-      "Ad Soyad": p.ad_soyad,
-      "Telefon": p.telefon,
-      "E-Posta": p.email || "",
-      "Okul / Bölüm": p.okul || "",
-      "Referans": p.referans || "",
-      "Koltuk No": p.koltuk_no || "Genel",
-      "Bilet Alındı mı": p.bilet_alindi_mi ? "Evet" : "Hayır",
-      "İçeride mi": p.geldi_mi ? "Evet" : "Hayır",
-    }));
+    const rows = approvedParticipants.map((p, index) => {
+      const rowObj: any = {
+        "#": index + 1,
+        "Ad Soyad": p.ad_soyad,
+        "Telefon": p.telefon,
+        "E-Posta": p.email || "",
+        "Okul / Bölüm": p.okul || "",
+        "Referans": p.referans || "",
+        "Koltuk No": p.koltuk_no || "Genel",
+        "Bilet Alındı mı": p.bilet_alindi_mi ? "Evet" : "Hayır",
+        "İçeride mi": p.geldi_mi ? "Evet" : "Hayır",
+      };
+
+      if (customQuestions && customQuestions.length > 0) {
+        customQuestions.forEach((q: any) => {
+          rowObj[`Soru: ${q.label || q.id}`] = (p.form_answers && p.form_answers[q.id]) || "—";
+        });
+      }
+
+      return rowObj;
+    });
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Katilimcilar");
@@ -436,22 +623,22 @@ function EventManagementContent() {
 
   const approveUser = async (person: any) => {
     if (approvingId) return;
-    setApprovingId(person.id);
+    const targetId = person.bilet_id || person.id;
+    setApprovingId(targetId);
     try {
-      const { error } = await supabase
-        .from('katilimcilar')
+      const generatedQr = person.qr_kodu || crypto.randomUUID();
+      await supabase
+        .from('biletler')
         .update({
           onayli_mi: true,
-          qr_kodu: person.qr_kodu || crypto.randomUUID(),
+          qr_kodu: generatedQr,
         })
-        .eq('id', person.id);
-
-      if (error) throw error;
+        .eq('id', targetId);
 
       await sendApprovalEmail(person);
 
       setParticipants((prev) =>
-        prev.map((p) => (p.id === person.id ? { ...p, onayli_mi: true } : p))
+        prev.map((p) => (p.bilet_id === targetId || p.id === targetId ? { ...p, onayli_mi: true } : p))
       );
     } catch (err: any) {
       alert("Onaylama hatası: " + err.message);
@@ -467,13 +654,16 @@ function EventManagementContent() {
     setBulkApproving(true);
     try {
       for (const person of pendingParticipants) {
+        const targetId = person.bilet_id || person.id;
+        const generatedQr = person.qr_kodu || crypto.randomUUID();
         await supabase
-          .from('katilimcilar')
+          .from('biletler')
           .update({
             onayli_mi: true,
-            qr_kodu: person.qr_kodu || crypto.randomUUID(),
+            qr_kodu: generatedQr,
           })
-          .eq('id', person.id);
+          .eq('id', targetId);
+
         await sendApprovalEmail(person);
       }
       await fetchEventParticipants();
@@ -494,13 +684,10 @@ function EventManagementContent() {
   const handleConfirmReject = async () => {
     if (!rejectingPerson) return;
     setIsRejecting(true);
-    const { error } = await supabase.from('katilimcilar').delete().eq('id', rejectingPerson.id);
-    if (!error) {
-      setParticipants((prev) => prev.filter((p) => p.id !== rejectingPerson.id));
-      setRejectingPerson(null);
-    } else {
-      alert("Silme hatası: " + error.message);
-    }
+    const targetId = rejectingPerson.bilet_id || rejectingPerson.id;
+    await supabase.from('biletler').delete().eq('id', targetId);
+    setParticipants((prev) => prev.filter((p) => p.bilet_id !== targetId && p.id !== targetId));
+    setRejectingPerson(null);
     setIsRejecting(false);
   };
 
@@ -573,20 +760,56 @@ function EventManagementContent() {
 
         const proceedWithUpload = async () => {
           setAddLoading(true);
-          if (formattedData.length > 0) {
-            const { error } = await supabase.from('katilimcilar').insert(formattedData);
-            if (!error) {
+          try {
+            if (formattedData.length > 0) {
+              for (const item of formattedData) {
+                let memberId: number | null = null;
+                const { data: existingKat } = await supabase
+                  .from('katilimcilar')
+                  .select('id')
+                  .eq('telefon', item.telefon)
+                  .maybeSingle();
+
+                if (existingKat) {
+                  memberId = existingKat.id;
+                } else {
+                  const { data: newKat } = await supabase
+                    .from('katilimcilar')
+                    .insert([{
+                      telefon: item.telefon,
+                      ad_soyad: item.ad_soyad,
+                      email: null,
+                      okul: null,
+                    }])
+                    .select()
+                    .maybeSingle();
+                  if (newKat) memberId = newKat.id;
+                }
+
+                if (memberId) {
+                  await supabase.from('biletler').insert([{
+                    etkinlik_id: eventId,
+                    katilimci_id: memberId,
+                    qr_kodu: item.qr_kodu || crypto.randomUUID(),
+                    onayli_mi: true,
+                    geldi_mi: false,
+                    bilet_alindi_mi: false,
+                  }]);
+                }
+              }
+
               alert(`${formattedData.length} kayıt başarıyla eklendi.`);
               fetchEventParticipants();
               setActiveTab('list');
             } else {
-              alert("Supabase Hatası: " + error.message);
+              alert("Excel'de uygun 'Ad Soyad' ve 'Telefon' sütunları bulunamadı!");
             }
-          } else {
-            alert("Excel'de uygun 'Ad Soyad' ve 'Telefon' sütunları bulunamadı!");
+          } catch (err: any) {
+            alert("Yükleme hatası: " + err.message);
+          } finally {
+            setAddLoading(false);
+            e.target.value = "";
           }
-          setAddLoading(false);
-          e.target.value = "";
         };
 
         if (allWarnings.length > 0) {
@@ -627,28 +850,54 @@ function EventManagementContent() {
 
     const proceedWithAdd = async () => {
       setAddLoading(true);
-      const { error } = await supabase.from('katilimcilar').insert([
-        {
-          ad_soyad: newPerson.ad_soyad.trim(),
-          telefon: phone,
-          email: newPerson.email.trim() || null,
-          okul: newPerson.okul.trim() || null,
-          qr_kodu: crypto.randomUUID(),
-          onayli_mi: true,
-          geldi_mi: false,
-          bilet_alindi_mi: false,
-          etkinlik_id: eventId,
-        },
-      ]);
+      try {
+        let memberId: number | null = null;
+        const { data: existingKat } = await supabase
+          .from('katilimcilar')
+          .select('id')
+          .eq('telefon', phone)
+          .maybeSingle();
 
-      if (!error) {
+        if (existingKat) {
+          memberId = existingKat.id;
+          await supabase.from('katilimcilar').update({
+            ad_soyad: newPerson.ad_soyad.trim(),
+            email: newPerson.email.trim() || null,
+            okul: newPerson.okul.trim() || null,
+          }).eq('id', memberId);
+        } else {
+          const { data: newKat } = await supabase
+            .from('katilimcilar')
+            .insert([{
+              telefon: phone,
+              ad_soyad: newPerson.ad_soyad.trim(),
+              email: newPerson.email.trim() || null,
+              okul: newPerson.okul.trim() || null,
+            }])
+            .select()
+            .maybeSingle();
+          if (newKat) memberId = newKat.id;
+        }
+
+        if (memberId) {
+          await supabase.from('biletler').insert([{
+            etkinlik_id: eventId,
+            katilimci_id: memberId,
+            qr_kodu: crypto.randomUUID(),
+            onayli_mi: true,
+            geldi_mi: false,
+            bilet_alindi_mi: false,
+          }]);
+        }
+
         setNewPerson({ ad_soyad: "", telefon: "", email: "", okul: "" });
         await fetchEventParticipants();
         alert("Katılımcı başarıyla eklendi!");
-      } else {
-        alert("Hata: " + error.message);
+      } catch (err: any) {
+        alert("Hata: " + err.message);
+      } finally {
+        setAddLoading(false);
       }
-      setAddLoading(false);
     };
 
     if (warnings.length > 0) {
@@ -681,24 +930,35 @@ function EventManagementContent() {
     const finalIsActive = expired ? false : event.is_active;
     const finalIsRegOpen = expired ? false : event.is_registration_open;
 
-    const { error } = await supabase
+    const updatePayload = {
+      event_name: event.event_name,
+      event_date: isoDateTime,
+      event_location: packEventLocation(event.event_location, event.location_url),
+      event_type: event.event_type,
+      is_active: finalIsActive,
+      has_seating: event.has_seating,
+      whatsapp_link: event.whatsapp_link,
+      is_paid: event.is_paid,
+      event_price: event.is_paid ? event.event_price : null,
+      event_iban: event.is_paid ? event.event_iban : null,
+      event_ibanname: event.is_paid ? event.event_ibanname : null,
+      is_registration_open: finalIsRegOpen,
+      is_featured: event.is_featured,
+    };
+
+    let { error } = await supabase
       .from('etkinlik_ayarlari')
       .update({
-        event_name: event.event_name,
-        event_date: isoDateTime,
-        event_location: packEventLocation(event.event_location, event.location_url),
-        event_type: event.event_type,
-        is_active: finalIsActive,
-        has_seating: event.has_seating,
-        whatsapp_link: event.whatsapp_link,
-        is_paid: event.is_paid,
-        event_price: event.is_paid ? event.event_price : null,
-        event_iban: event.is_paid ? event.event_iban : null,
-        event_ibanname: event.is_paid ? event.event_ibanname : null,
-        is_registration_open: finalIsRegOpen,
-        is_featured: event.is_featured,
+        ...updatePayload,
+        custom_questions: customQuestions,
       })
       .eq('id', event.id);
+
+    if (error && (error.message?.includes('custom_questions') || error.code === 'PGRST204')) {
+      alert("Bilgi:\n\n'etkinlik_ayarlari' tablosunda 'custom_questions' sütunu henüz eklenmemiş.\nSoruların kaydedilebilmesi için lütfen Supabase SQL Editöründe şu komutu çalıştırın:\n\nALTER TABLE public.etkinlik_ayarlari ADD COLUMN IF NOT EXISTS custom_questions JSONB DEFAULT '[]'::jsonb;");
+      const retry = await supabase.from('etkinlik_ayarlari').update(updatePayload).eq('id', event.id);
+      error = retry.error;
+    }
 
     if (error) {
       alert("Ayarlar kaydedilirken hata: " + error.message);
@@ -844,6 +1104,112 @@ function EventManagementContent() {
               <button
                 onClick={() => setViewingReceiptUrl(null)}
                 className="px-6 bg-slate-800 hover:bg-slate-700 text-slate-300 py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider transition-all"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BAŞVURU FORMU YANITLARI MODALI */}
+      {viewingAnswersPerson && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="w-full max-w-2xl bg-slate-900 border border-white/10 rounded-[2.5rem] p-6 shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="w-full flex justify-between items-center pb-4 border-b border-white/5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+                  <FileQuestion size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">Başvuru Formu Yanıtları</h3>
+                  <p className="text-xs text-slate-400 font-medium">
+                    {viewingAnswersPerson.ad_soyad} • <span className="text-slate-500 font-mono">#{viewingAnswersPerson.id}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingAnswersPerson(null)}
+                className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="w-full flex-1 overflow-y-auto py-4 space-y-4 custom-scrollbar pr-1">
+              {/* Katılımcı Temel Bilgileri */}
+              <div className="grid grid-cols-2 gap-3 p-3.5 rounded-2xl bg-slate-950 border border-white/5 text-xs">
+                <div>
+                  <span className="text-slate-500 text-[10px] uppercase font-bold block">Telefon</span>
+                  <span className="text-white font-mono">{viewingAnswersPerson.telefon}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 text-[10px] uppercase font-bold block">E-Posta</span>
+                  <span className="text-white">{viewingAnswersPerson.email || 'Belirtilmemiş'}</span>
+                </div>
+                {viewingAnswersPerson.okul && (
+                  <div className="col-span-2">
+                    <span className="text-slate-500 text-[10px] uppercase font-bold block">Okul / Bölüm</span>
+                    <span className="text-white">{viewingAnswersPerson.okul}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Sorular ve Cevaplar */}
+              {customQuestions && customQuestions.length > 0 ? (
+                customQuestions.map((q: any, idx: number) => {
+                  const ans = viewingAnswersPerson.form_answers?.[q.id] ?? viewingAnswersPerson.form_answers?.[q.label];
+                  return (
+                    <div key={q.id || idx} className="p-4 rounded-2xl bg-slate-950/80 border border-white/5 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-xs font-bold text-slate-300 leading-snug">
+                          <span className="text-purple-400 font-black mr-1.5">{idx + 1}.</span>
+                          {q.label || 'İsimsiz Soru'}
+                        </span>
+                        {q.required && (
+                          <span className="text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded-full font-bold uppercase shrink-0">
+                            Zorunlu
+                          </span>
+                        )}
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-900 border border-white/5 text-sm text-white font-medium whitespace-pre-wrap">
+                        {ans !== undefined && ans !== null && String(ans).trim() !== '' ? (
+                          String(ans)
+                        ) : (
+                          <span className="text-slate-500 italic text-xs">Cevaplanmamış</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              ) : viewingAnswersPerson.form_answers && Object.keys(viewingAnswersPerson.form_answers).length > 0 ? (
+                Object.entries(viewingAnswersPerson.form_answers).map(([key, val]: any, idx: number) => (
+                  <div key={key || idx} className="p-4 rounded-2xl bg-slate-950/80 border border-white/5 space-y-2">
+                    <span className="text-xs font-bold text-slate-300 leading-snug">
+                      <span className="text-purple-400 font-black mr-1.5">{idx + 1}.</span>
+                      {key}
+                    </span>
+                    <div className="p-3 rounded-xl bg-slate-900 border border-white/5 text-sm text-white font-medium whitespace-pre-wrap">
+                      {val !== undefined && val !== null && String(val).trim() !== '' ? (
+                        String(val)
+                      ) : (
+                        <span className="text-slate-500 italic text-xs">Boş</span>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-10 text-slate-500 text-xs">
+                  Bu katılımcı için özel soru yanıtı bulunamadı.
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-white/5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setViewingAnswersPerson(null)}
+                className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
               >
                 Kapat
               </button>
@@ -1060,8 +1426,8 @@ function EventManagementContent() {
           </div>
         </div>
 
-        {/* 4 Özet İstatistik Kartı */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+        {/* Özet İstatistik Kartları */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
           <button
             type="button"
             onClick={() => setActiveTab('list')}
@@ -1086,6 +1452,19 @@ function EventManagementContent() {
 
           <button
             type="button"
+            onClick={() => setActiveTab('banned')}
+            className={`border p-4 rounded-2xl text-left transition-all ${
+              bannedParticipants.length > 0
+                ? 'bg-rose-500/15 border-rose-500/40 hover:bg-rose-500/25'
+                : 'bg-slate-950/60 border-white/5'
+            }`}
+          >
+            <span className="text-[10px] font-black uppercase tracking-wider text-rose-400 block">Yasaklanan</span>
+            <span className="text-2xl font-black text-rose-400">{bannedParticipants.length}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => { setActiveTab('list'); setFilterTicketed(true); setFilterNotTicketed(false); }}
             className="bg-slate-950/60 border border-white/5 hover:border-blue-500/30 p-4 rounded-2xl text-left transition-all"
           >
@@ -1103,8 +1482,8 @@ function EventManagementContent() {
           </button>
         </div>
 
-        {/* 5 ANA SEKME MENÜSÜ */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2">
+        {/* ANA SEKME MENÜSÜ */}
+        <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 pt-2">
           <button
             onClick={() => setActiveTab('list')}
             className={`py-3.5 px-4 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
@@ -1126,12 +1505,31 @@ function EventManagementContent() {
             }`}
           >
             <Clock size={16} />
-            <span>Onay Bekleyen</span>
+            <span>Bekleyen</span>
             {pendingParticipants.length > 0 && (
               <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
                 activeTab === 'pending' ? 'bg-slate-950 text-amber-400' : 'bg-amber-500 text-slate-950'
               }`}>
                 {pendingParticipants.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('banned')}
+            className={`py-3.5 px-4 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all relative ${
+              activeTab === 'banned'
+                ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/25'
+                : 'bg-slate-950/70 text-slate-400 hover:text-white border border-white/5'
+            }`}
+          >
+            <ShieldAlert size={16} />
+            <span>Yasaklı</span>
+            {bannedParticipants.length > 0 && (
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                activeTab === 'banned' ? 'bg-white text-rose-600' : 'bg-rose-500 text-white'
+              }`}>
+                {bannedParticipants.length}
               </span>
             )}
           </button>
@@ -1145,7 +1543,7 @@ function EventManagementContent() {
             }`}
           >
             <UserPlus size={16} />
-            <span>Katılımcı Ekle</span>
+            <span>Ekle</span>
           </button>
 
           <button
@@ -1157,7 +1555,7 @@ function EventManagementContent() {
             }`}
           >
             <Camera size={16} />
-            <span>QR Okuyucu</span>
+            <span>QR</span>
           </button>
 
           <button
@@ -1169,7 +1567,7 @@ function EventManagementContent() {
             }`}
           >
             <Settings2 size={16} />
-            <span>Ayarlar & Koltuk</span>
+            <span>Ayarlar</span>
           </button>
         </div>
       </div>
@@ -1340,6 +1738,16 @@ function EventManagementContent() {
                               <Armchair size={14} /> KOLTUK: {person.koltuk_no}
                             </span>
                           )}
+                          {((person.form_answers && Object.keys(person.form_answers).length > 0) || (customQuestions && customQuestions.length > 0)) && (
+                            <button
+                              type="button"
+                              onClick={() => setViewingAnswersPerson(person)}
+                              className="text-[10px] font-bold px-3 py-1.5 rounded-lg border bg-purple-500/10 text-purple-300 border-purple-500/20 hover:bg-purple-600 hover:text-white flex items-center gap-1.5 transition-all"
+                              title="Başvuru Formu Yanıtları"
+                            >
+                              <FileQuestion size={13} /> Form Yanıtları
+                            </button>
+                          )}
                         </div>
 
                         <div className="flex flex-col gap-1">
@@ -1393,13 +1801,14 @@ function EventManagementContent() {
                           <button
                             onClick={async () => {
                               if (confirm(`${person.ad_soyad} içeri alınsın mı?`)) {
+                                const ticketId = person.bilet_id || person.id;
                                 const { error } = await supabase
-                                  .from('katilimcilar')
+                                  .from('biletler')
                                   .update({ geldi_mi: true })
-                                  .eq('id', person.id);
+                                  .eq('id', ticketId);
                                 if (!error) {
                                   setParticipants((prev) =>
-                                    prev.map((p) => (p.id === person.id ? { ...p, geldi_mi: true } : p))
+                                    prev.map((p) => (p.bilet_id === ticketId || p.id === ticketId ? { ...p, geldi_mi: true } : p))
                                   );
                                 }
                               }
@@ -1424,6 +1833,13 @@ function EventManagementContent() {
                             className="flex-1 p-4 bg-amber-500/10 text-amber-500 rounded-2xl border border-amber-500/20 hover:bg-amber-500 hover:text-white transition-all flex items-center justify-center"
                           >
                             <RefreshCcw size={20} />
+                          </button>
+                          <button
+                            onClick={() => handleToggleBan(person)}
+                            title="Katılımcıyı Yasakla (Banla)"
+                            className="flex-1 p-4 bg-purple-500/10 text-purple-400 rounded-2xl border border-purple-500/20 hover:bg-purple-600 hover:text-white transition-all flex items-center justify-center"
+                          >
+                            <ShieldAlert size={20} />
                           </button>
                           <button
                             onClick={() => deleteUser(person.id)}
@@ -1587,6 +2003,16 @@ function EventManagementContent() {
                           <FileText size={14} /> DEKONTU GÖR
                         </button>
                       )}
+                      {((person.form_answers && Object.keys(person.form_answers).length > 0) || (customQuestions && customQuestions.length > 0)) && (
+                        <button
+                          type="button"
+                          onClick={() => setViewingAnswersPerson(person)}
+                          className="flex items-center gap-1.5 bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 px-3 py-1.5 rounded-xl font-black text-xs transition-all"
+                          title="Başvuru Formu Yanıtları"
+                        >
+                          <FileQuestion size={14} /> FORM YANITLARI
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1610,6 +2036,101 @@ function EventManagementContent() {
                       className="flex-1 bg-rose-500/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/30 px-5 py-3 rounded-2xl font-black transition-all active:scale-95 flex items-center justify-center gap-1.5 text-xs uppercase tracking-wider"
                     >
                       <X size={16} /> REDDET
+                    </button>
+
+                    <button
+                      onClick={() => handleToggleBan(person)}
+                      className="flex-1 bg-purple-500/20 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/30 px-5 py-3 rounded-2xl font-black transition-all active:scale-95 flex items-center justify-center gap-1.5 text-xs uppercase tracking-wider"
+                      title="Katılımcıyı Yasakla (Kullanıcı onay bekliyor görmeye devam eder)"
+                    >
+                      <ShieldAlert size={16} /> YASAKLA
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          SEKME: YASAKLANANLAR (GÖLGE BANLI KATILIMCILAR)
+         ===================================================================== */}
+      {activeTab === 'banned' && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="flex flex-wrap justify-between items-center gap-4 bg-slate-900/60 p-6 rounded-[2rem] border border-rose-500/20">
+            <div>
+              <h2 className="text-xl font-black uppercase flex items-center gap-2 text-rose-400">
+                <ShieldAlert size={22} /> Yasaklanan Katılımcılar ({bannedParticipants.length})
+              </h2>
+              <p className="text-xs text-slate-400 font-bold mt-1">
+                Bu kullanıcılar sistemde yasaklanmıştır. Kullanıcı arayüzünde banlandıkları söylenmez, onay bekliyor gibi görünürler.
+              </p>
+            </div>
+            <button
+              onClick={() => fetchEventParticipants()}
+              className="p-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-white"
+            >
+              <RefreshCcw size={20} className={loadingParticipants ? "animate-spin" : ""} />
+            </button>
+          </div>
+
+          <div className="grid gap-4">
+            {bannedParticipants.length === 0 ? (
+              <div className="text-center p-16 bg-slate-900/20 rounded-[2.5rem] border border-dashed border-white/10 text-white">
+                <CheckCircle2 className="mx-auto text-emerald-500/40 mb-4" size={52} />
+                <p className="text-slate-400 font-black uppercase text-sm tracking-wider">
+                  Bu etkinlikte yasaklanmış katılımcı bulunmuyor.
+                </p>
+              </div>
+            ) : (
+              bannedParticipants.map((person) => (
+                <div
+                  key={person.id}
+                  className="bg-slate-900/40 border border-rose-500/20 p-6 rounded-[2rem] flex flex-col sm:flex-row justify-between items-start sm:items-center text-white gap-4"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[9px] font-black uppercase px-2.5 py-1 rounded-md">
+                        YASAKLI (GÖLGE BAN)
+                      </span>
+                      <h3 className="font-black text-lg">{person.ad_soyad}</h3>
+                    </div>
+                    <div className="flex flex-wrap gap-4 text-xs text-slate-300 font-bold">
+                      <span>📞 {person.telefon}</span>
+                      {person.email && <span>✉️ {person.email}</span>}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2.5 pt-1 text-xs">
+                      {person.okul && (
+                        <div className="flex items-center gap-1.5 text-slate-300 bg-white/5 px-3 py-1.5 rounded-xl border border-white/5">
+                          <GraduationCap size={14} className="text-blue-400" />
+                          <span>{person.okul}</span>
+                        </div>
+                      )}
+                      {person.dekont_url && (
+                        <button
+                          onClick={() => setViewingReceiptUrl(person.dekont_url)}
+                          className="text-[10px] text-blue-400 underline font-bold"
+                        >
+                          Ödeme Dekontunu İncele
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 w-full sm:w-auto">
+                    <button
+                      onClick={() => handleToggleBan(person)}
+                      className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Check size={16} /> YASAĞI KALDIR
+                    </button>
+                    <button
+                      onClick={() => deleteUser(person.id)}
+                      className="p-3 bg-rose-500/20 hover:bg-rose-600 text-rose-400 hover:text-white rounded-2xl transition-all"
+                      title="Bileti Sil"
+                    >
+                      <Trash2 size={18} />
                     </button>
                   </div>
                 </div>
@@ -2114,6 +2635,128 @@ function EventManagementContent() {
                       />
                     </div>
                   </div>
+                </div>
+              )}
+            </div>
+
+            {/* ÖZEL BAŞVURU SORULARI */}
+            <div className="bg-slate-950/70 p-6 rounded-[2rem] border border-blue-500/20 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-blue-600/20 text-blue-400 rounded-2xl border border-blue-500/30">
+                    <FileQuestion size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black uppercase text-white tracking-wide">
+                      Başvuru Soruları
+                    </h3>
+                    <p className="text-xs text-slate-400 font-bold">
+                      Kayıt formunda katılımcıya yöneltilecek özel sorular ({customQuestions.length} Soru)
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAddQuestion}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase px-4 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Plus size={15} /> Soru Ekle
+                </button>
+              </div>
+
+              {/* Soru Listesi */}
+              {customQuestions.length === 0 ? (
+                <div className="p-8 text-center bg-slate-900/30 rounded-2xl border border-dashed border-white/10 text-slate-500 text-xs">
+                  Bu etkinlik için henüz özel bir başvuru sorusu eklenmedi. Katılımcılar sadece standart kimlik bilgileriyle kayıt olur.
+                </div>
+              ) : (
+                <div className="space-y-3 pt-2">
+                  {customQuestions.map((q, qIndex) => (
+                    <div
+                      key={q.id || qIndex}
+                      className="bg-slate-900/80 border border-white/10 p-5 rounded-2xl space-y-3 transition-all hover:border-blue-500/30"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[10px] font-mono font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-md">
+                          Soru #{qIndex + 1}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateQuestion(qIndex, 'required', !q.required)}
+                            className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase border transition-all ${
+                              q.required
+                                ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                                : 'bg-slate-800 text-slate-400 border-white/5'
+                            }`}
+                          >
+                            {q.required ? '* Zorunlu Soru' : 'İsteğe Bağlı'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveQuestion(qIndex)}
+                            className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white transition-colors cursor-pointer"
+                            title="Soruyu Sil"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Soru Metni */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 block mb-1">Soru Metni</label>
+                        <input
+                          placeholder="Örn: Bu derslere katılma motivasyonunuz nedir?"
+                          value={q.label}
+                          onChange={(e) => handleUpdateQuestion(qIndex, 'label', e.target.value)}
+                          className="w-full bg-slate-950 border border-white/10 p-3 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500"
+                        />
+                      </div>
+
+                      {/* Yanıt Türü & İpuçları */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 block mb-1">Yanıt Türü</label>
+                          <select
+                            value={q.type || 'textarea'}
+                            onChange={(e) => handleUpdateQuestion(qIndex, 'type', e.target.value)}
+                            className="w-full bg-slate-950 border border-white/10 p-3 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500"
+                          >
+                            <option value="textarea">Uzun Paragraf (Açıklama / Motivasyon)</option>
+                            <option value="text">Kısa Yanıt (Tek Satır)</option>
+                            <option value="radio">Tekli Seçim (Evet / Hayır vb. Butonlar)</option>
+                            <option value="select">Açılır Liste (Seçmeli)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 block mb-1">
+                            {q.type === 'radio' || q.type === 'select' ? 'Seçenekler (Virgülle Ayırın)' : 'İpucu / Placeholder'}
+                          </label>
+                          {q.type === 'radio' || q.type === 'select' ? (
+                            <input
+                              placeholder="Örn: Evet, Hayır, Kısmen"
+                              value={(q.options || []).join(', ')}
+                              onChange={(e) => {
+                                const opts = e.target.value.split(',').map((s: string) => s.trim()).filter(Boolean);
+                                handleUpdateQuestion(qIndex, 'options', opts);
+                              }}
+                              className="w-full bg-slate-950 border border-white/10 p-3 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500"
+                            />
+                          ) : (
+                            <input
+                              placeholder="Örn: Kısaca hedeflerinizi anlatın..."
+                              value={q.placeholder || ''}
+                              onChange={(e) => handleUpdateQuestion(qIndex, 'placeholder', e.target.value)}
+                              className="w-full bg-slate-950 border border-white/10 p-3 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500"
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

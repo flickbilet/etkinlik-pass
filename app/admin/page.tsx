@@ -8,7 +8,8 @@ import {
   Plus, Calendar, MapPin, Users, Clock, CheckCircle2, TicketCheck,
   Film, Theater, Trophy, Sparkles, Armchair, CreditCard, Banknote,
   User, Link2, Archive, ArchiveRestore, Trash2, ArrowRight, Search,
-  Loader2, X, Power, RefreshCcw, FolderKanban, AlertCircle, ExternalLink
+  Loader2, X, Power, RefreshCcw, FolderKanban, AlertCircle, ExternalLink, ShieldAlert,
+  FileQuestion
 } from 'lucide-react';
 import { buildEventDateTime, formatEventDateDisplay, isEventPast, packEventLocation, unpackEventLocation } from '@/lib/dateUtils';
 
@@ -30,6 +31,7 @@ export default function AdminDashboardPage() {
     pending: number;
     ticketed: number;
     arrived: number;
+    banned: number;
   }>>({});
   const [loadingStats, setLoadingStats] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
@@ -56,20 +58,82 @@ export default function AdminDashboardPage() {
     event_ibanname: '',
   });
 
+  // Özel başvuru soruları
+  const [customQuestions, setCustomQuestions] = useState<any[]>([]);
+
+  const handleAddQuestion = () => {
+    const newQ = {
+      id: 'q_' + Date.now(),
+      label: '',
+      type: 'textarea', // 'textarea' | 'text' | 'radio' | 'select'
+      options: ['Evet', 'Hayır'],
+      required: true,
+      placeholder: '',
+    };
+    setCustomQuestions(prev => [...prev, newQ]);
+  };
+
+  const handleUpdateQuestion = (index: number, field: string, value: any) => {
+    setCustomQuestions(prev => {
+      const copy = [...prev];
+      copy[index] = { ...copy[index], [field]: value };
+      return copy;
+    });
+  };
+
+  const handleRemoveQuestion = (index: number) => {
+    setCustomQuestions(prev => prev.filter((_, i) => i !== index));
+  };
+
   const fetchAllParticipantStats = useCallback(async () => {
     setLoadingStats(true);
-    const { data, error } = await supabase
-      .from('katilimcilar')
-      .select('id, etkinlik_id, onayli_mi, bilet_alindi_mi, geldi_mi');
+    const [ticketsRes, membersRes] = await Promise.all([
+      supabase
+        .from('biletler')
+        .select('id, katilimci_id, etkinlik_id, onayli_mi, bilet_alindi_mi, geldi_mi'),
+      supabase
+        .from('katilimcilar')
+        .select('id, telefon, is_banned, referans')
+    ]);
 
-    if (!error && data) {
-      const map: Record<number, { approved: number; pending: number; ticketed: number; arrived: number }> = {};
+    let data = ticketsRes.data;
+    if (ticketsRes.error || !data) {
+      // Geriye dönük uyumluluk: migration öncesi katilimcilar tablosundan çek
+      const fallback = await supabase
+        .from('katilimcilar')
+        .select('id, etkinlik_id, onayli_mi, bilet_alindi_mi, geldi_mi, is_banned, referans');
+      data = fallback.data;
+    }
+
+    const bannedMemberIds = new Set<number>();
+    if (membersRes.data) {
+      for (const m of membersRes.data) {
+        if (m.is_banned === true || (typeof m.referans === 'string' && m.referans.includes('[YASAKLI]'))) {
+          bannedMemberIds.add(Number(m.id));
+        }
+      }
+    }
+
+    if (data) {
+      const map: Record<number, { approved: number; pending: number; ticketed: number; arrived: number; banned: number }> = {};
 
       for (const p of data) {
         const eid = Number(p.etkinlik_id);
         if (!map[eid]) {
-          map[eid] = { approved: 0, pending: 0, ticketed: 0, arrived: 0 };
+          map[eid] = { approved: 0, pending: 0, ticketed: 0, arrived: 0, banned: 0 };
         }
+
+        const kid = Number(p.katilimci_id || p.id);
+        const isBanned = bannedMemberIds.has(kid) || 
+          p.is_banned === true || 
+          (typeof p.referans === 'string' && p.referans.includes('[YASAKLI]'));
+
+        // YASAKLI OLANLAR KESİNLİKLE BEKLEYEN LİSTESİNE GİRMESİN
+        if (isBanned) {
+          map[eid].banned += 1;
+          continue;
+        }
+
         if (p.onayli_mi === false || p.onayli_mi === null) {
           map[eid].pending += 1;
         } else {
@@ -93,7 +157,7 @@ export default function AdminDashboardPage() {
     if (ev.slot_id && ev.slot_id !== ev.id && statsByEvent[Number(ev.slot_id)]) {
       return statsByEvent[Number(ev.slot_id)];
     }
-    return { approved: 0, pending: 0, ticketed: 0, arrived: 0 };
+    return { approved: 0, pending: 0, ticketed: 0, arrived: 0, banned: 0 };
   };
 
   const handleCreateEvent = async (e: React.FormEvent) => {
@@ -148,17 +212,31 @@ export default function AdminDashboardPage() {
         event_price: newEvent.is_paid ? newEvent.event_price : null,
         event_iban: newEvent.is_paid ? newEvent.event_iban.trim() : null,
         event_ibanname: newEvent.is_paid ? newEvent.event_ibanname.trim() : null,
+        custom_questions: customQuestions,
       };
 
-      const { data: created, error } = await supabase
+      let { data: created, error } = await supabase
         .from('etkinlik_ayarlari')
         .insert([payload])
         .select()
         .single();
 
+      // custom_questions kolonu henüz eklenmemişse hata vermeden tekrar dene
+      if (error && (error.message?.includes('custom_questions') || error.code === 'PGRST204')) {
+        delete payload.custom_questions;
+        const retry = await supabase
+          .from('etkinlik_ayarlari')
+          .insert([payload])
+          .select()
+          .single();
+        created = retry.data;
+        error = retry.error;
+      }
+
       if (error) throw error;
 
       setIsCreateModalOpen(false);
+      setCustomQuestions([]);
       setNewEvent({
         event_name: '',
         event_type: 'cinema',
@@ -245,6 +323,7 @@ export default function AdminDashboardPage() {
 
     setActionLoadingId(ev.id);
     try {
+      await supabase.from('biletler').delete().eq('etkinlik_id', ev.id);
       await supabase.from('katilimcilar').delete().eq('etkinlik_id', ev.id);
       const { error } = await supabase.from('etkinlik_ayarlari').delete().eq('id', ev.id);
       if (error) throw error;
@@ -290,7 +369,10 @@ export default function AdminDashboardPage() {
                 </p>
               </div>
               <button
-                onClick={() => setIsCreateModalOpen(false)}
+                onClick={() => {
+                  setIsCreateModalOpen(false);
+                  setCustomQuestions([]);
+                }}
                 className="bg-slate-800 p-2.5 rounded-2xl text-slate-400 hover:text-white hover:bg-rose-500/20 transition-all"
               >
                 <X size={20} />
@@ -467,6 +549,42 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
 
+              {/* Yayın Durumu: Aktif mi yoksa Planlanan / Taslak mı? */}
+              <div className="bg-slate-900/80 p-4 rounded-2xl border border-white/5 space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
+                  Yayın Durumu
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewEvent({ ...newEvent, is_active: true })}
+                    className={`p-3 rounded-xl border text-xs font-black uppercase flex items-center justify-center gap-2 transition-all ${
+                      newEvent.is_active
+                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-lg shadow-emerald-500/20'
+                        : 'bg-slate-950 border-white/5 text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    <Power size={14} /> Hemen Yayına Al (Aktif)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewEvent({ ...newEvent, is_active: false })}
+                    className={`p-3 rounded-xl border text-xs font-black uppercase flex items-center justify-center gap-2 transition-all ${
+                      !newEvent.is_active
+                        ? 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-lg shadow-amber-500/20'
+                        : 'bg-slate-950 border-white/5 text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    <Calendar size={14} /> Planlanan / Taslak (Gizli)
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  {newEvent.is_active
+                    ? "Etkinlik hemen ana sayfada ve sitede kullanıcılara gösterilir."
+                    : "Etkinlik takvimde ve panelde plan olarak görünür; siz aktife alana kadar sitede kullanıcılara gözükmez."}
+                </p>
+              </div>
+
               {/* Anahtar Seçenekler */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                 <button
@@ -558,10 +676,137 @@ export default function AdminDashboardPage() {
                 )}
               </div>
 
+              {/* BAŞVURU SORULARI */}
+              <div className="bg-slate-900/60 p-5 sm:p-6 rounded-[2rem] border border-blue-500/20 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-blue-600/20 text-blue-400 rounded-2xl border border-blue-500/30">
+                      <FileQuestion size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-black uppercase text-white tracking-wide">
+                        Başvuru Soruları
+                      </h3>
+                      <p className="text-[11px] text-slate-400 font-bold">
+                        Kayıt formunda katılımcıya yöneltilecek özel sorular ({customQuestions.length} Soru)
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAddQuestion}
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase px-4 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Plus size={15} /> Soru Ekle
+                  </button>
+                </div>
+
+                {/* Soru Listesi */}
+                {customQuestions.length === 0 ? (
+                  <div className="p-6 rounded-2xl border border-dashed border-white/10 text-center">
+                    <p className="text-xs text-slate-500 font-medium max-w-md mx-auto">
+                      Bu etkinlik için henüz özel bir başvuru sorusu eklenmedi. Katılımcılar sadece standart kimlik bilgileriyle kayıt olur.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {customQuestions.map((q, qIndex) => (
+                      <div
+                        key={q.id || qIndex}
+                        className="p-4 sm:p-5 rounded-2xl bg-slate-950 border border-white/10 space-y-3 relative group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black uppercase tracking-wider text-blue-400">
+                            Soru #{qIndex + 1}
+                          </span>
+                          <div className="flex items-center gap-3">
+                            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-400 select-none">
+                              <input
+                                type="checkbox"
+                                checked={q.required}
+                                onChange={(e) => handleUpdateQuestion(qIndex, 'required', e.target.checked)}
+                                className="w-4 h-4 rounded text-blue-600 bg-slate-900 border-white/20 focus:ring-0 cursor-pointer"
+                              />
+                              <span className={q.required ? 'text-rose-400 font-black' : 'text-slate-400'}>
+                                * Zorunlu Soru
+                              </span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveQuestion(qIndex)}
+                              className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white transition-colors cursor-pointer"
+                              title="Soruyu Sil"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Soru Metni */}
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 block mb-1">Soru Metni</label>
+                          <input
+                            placeholder="Örn: Bu derslere katılma motivasyonunuz nedir?"
+                            value={q.label}
+                            onChange={(e) => handleUpdateQuestion(qIndex, 'label', e.target.value)}
+                            className="w-full bg-slate-900 border border-white/10 p-3 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        {/* Yanıt Türü & İpuçları */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 block mb-1">Yanıt Türü</label>
+                            <select
+                              value={q.type || 'textarea'}
+                              onChange={(e) => handleUpdateQuestion(qIndex, 'type', e.target.value)}
+                              className="w-full bg-slate-900 border border-white/10 p-3 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500 cursor-pointer"
+                            >
+                              <option value="textarea">Uzun Paragraf (Açıklama / Motivasyon)</option>
+                              <option value="text">Kısa Yanıt (Tek Satır)</option>
+                              <option value="radio">Tekli Seçim (Evet / Hayır vb. Butonlar)</option>
+                              <option value="select">Açılır Liste (Seçmeli)</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 block mb-1">
+                              {q.type === 'radio' || q.type === 'select' ? 'Seçenekler (Virgülle Ayırın)' : 'İpucu / Placeholder'}
+                            </label>
+                            {q.type === 'radio' || q.type === 'select' ? (
+                              <input
+                                placeholder="Örn: Evet, Hayır, Kısmen"
+                                value={(q.options || []).join(', ')}
+                                onChange={(e) => {
+                                  const opts = e.target.value.split(',').map((s: string) => s.trim()).filter(Boolean);
+                                  handleUpdateQuestion(qIndex, 'options', opts);
+                                }}
+                                className="w-full bg-slate-900 border border-white/10 p-3 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500"
+                              />
+                            ) : (
+                              <input
+                                placeholder="Örn: Kısaca hedeflerinizi anlatın..."
+                                value={q.placeholder || ''}
+                                onChange={(e) => handleUpdateQuestion(qIndex, 'placeholder', e.target.value)}
+                                className="w-full bg-slate-900 border border-white/10 p-3 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500"
+                              />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="pt-4 flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setIsCreateModalOpen(false)}
+                  onClick={() => {
+                    setIsCreateModalOpen(false);
+                    setCustomQuestions([]);
+                  }}
                   className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-4 rounded-2xl font-black text-xs uppercase tracking-wider transition-all"
                 >
                   İptal
@@ -652,6 +897,13 @@ export default function AdminDashboardPage() {
             <Archive size={15} />
             <span>Geçmiş Etkinlikler ({archivedEvents.length})</span>
           </button>
+          <Link
+            href="/admin/calendar"
+            className="flex-1 md:flex-initial px-5 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 text-slate-400 hover:text-white hover:bg-slate-800"
+          >
+            <Calendar size={15} />
+            <span>Takvim Görünümü</span>
+          </Link>
         </div>
 
         <div className="flex flex-1 max-w-md items-center gap-2">
@@ -759,6 +1011,15 @@ export default function AdminDashboardPage() {
                         <span className="px-3 py-1 rounded-xl text-[10px] font-black uppercase bg-amber-500/15 text-amber-400 border border-amber-500/30">
                           {ev.event_price ? `${ev.event_price} TL` : 'Ücretli'}
                         </span>
+                      )}
+
+                      {stats.banned > 0 && (
+                        <Link
+                          href={`/admin/events/${ev.id}?tab=banned`}
+                          className="px-3 py-1 rounded-xl text-[10px] font-black uppercase bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:bg-rose-500/25 transition-all flex items-center gap-1"
+                        >
+                          <ShieldAlert size={12} /> {stats.banned} Yasaklı
+                        </Link>
                       )}
                     </div>
 
