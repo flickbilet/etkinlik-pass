@@ -8,7 +8,7 @@ import SeatMap from './components/SeatMap';
 import TicketView from './components/TicketView';
 import NewRegistration from './components/NewRegistration'; 
 import { UserPlus, Info, ArrowLeft, HelpCircle, ShieldCheck } from 'lucide-react'; 
-import { isEventPast, formatEventDateDisplay, unpackEventLocation } from '@/lib/dateUtils';
+import { isEventPast, formatEventDateDisplay, unpackEventLocation, isEventWithinOneHour, shouldAutoCloseRegistration } from '@/lib/dateUtils';
 
 // Bağlantı hatası durumunda jsPDF için güvenli Türkçe karakter dönüştürücü
 function toSafeAscii(text: string): string {
@@ -171,17 +171,18 @@ export default function Home() {
         .order('id', { ascending: false });
       
       if (slots) {
-        const validActiveSlots: any[] = [];
-        for (const s of slots) {
-          if (isEventPast(s.event_date)) {
-            await supabase
-              .from('etkinlik_ayarlari')
-              .update({ is_active: false, is_registration_open: false })
-              .eq('id', s.id);
-          } else {
-            validActiveSlots.push(s);
-          }
-        }
+        // Tarihi gerçekten geçmiş olan etkinlikleri ana sayfada gösterme
+        const validActiveSlots = slots
+          .filter((s: any) => !isEventPast(s.event_date))
+          .map((s: any) => {
+            // Eğer 1 saatten az kalmışsa ve manuel açılmamışsa, kayıtları otomatik sadece bilet hazırlamaya çek
+            if (s.is_registration_open && shouldAutoCloseRegistration(s)) {
+              supabase.from('etkinlik_ayarlari').update({ is_registration_open: false }).eq('id', s.id);
+              return { ...s, is_registration_open: false };
+            }
+            return s;
+          });
+
         setEventSlots(validActiveSlots);
         if (selectedEvent) {
           const updatedSelected = validActiveSlots.find((s: any) => s.id === selectedEvent.id);
@@ -192,6 +193,25 @@ export default function Home() {
     };
     
     fetchInitialData();
+
+    // 1 saat kuralı için periyodik kontrol (kullanıcı sayfadayken süre dolarsa anında sadece bilet hazırlamaya çek)
+    const checkOneHourInterval = setInterval(() => {
+      setEventSlots((prevSlots) =>
+        prevSlots.map((s) => {
+          if (s.is_registration_open && shouldAutoCloseRegistration(s)) {
+            supabase.from('etkinlik_ayarlari').update({ is_registration_open: false }).eq('id', s.id);
+            return { ...s, is_registration_open: false };
+          }
+          return s;
+        })
+      );
+      setSelectedEvent((prevSelected: any) => {
+        if (prevSelected && prevSelected.is_registration_open && shouldAutoCloseRegistration(prevSelected)) {
+          return { ...prevSelected, is_registration_open: false };
+        }
+        return prevSelected;
+      });
+    }, 30000);
 
     const settingsChannel = supabase
       .channel('realtime_event_settings')
@@ -222,6 +242,7 @@ export default function Home() {
       }).subscribe();
 
     return () => {
+      clearInterval(checkOneHourInterval);
       supabase.removeChannel(settingsChannel);
       supabase.removeChannel(seatsChannel);
     };
@@ -546,7 +567,7 @@ export default function Home() {
                 {/* Step 1'deyken yalnızca kayıtlar açıksa Yeni Kayıt Butonunu göster */}
                 {step === 1 && (
                   <div className="pt-6 border-t border-white/5 text-center">
-                    {selectedEvent?.is_registration_open !== false && (
+                    {selectedEvent?.is_registration_open !== false && !shouldAutoCloseRegistration(selectedEvent) && (
                       <>
                         <p className="text-[10px] text-slate-500 mb-4 uppercase font-black tracking-widest italic">Henüz Kayıt Yapmadınız mı?</p>
                         

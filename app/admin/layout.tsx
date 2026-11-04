@@ -7,7 +7,7 @@ import {
   Lock, ShieldCheck, CalendarRange, ClipboardList, 
   Loader2, LogOut, ExternalLink, AlertCircle, Calendar
 } from 'lucide-react';
-import { isEventPast } from '@/lib/dateUtils';
+import { isEventPast, shouldAutoCloseRegistration } from '@/lib/dateUtils';
 
 const AdminContext = createContext<any>(null);
 export const useAdmin = () => useContext(AdminContext);
@@ -47,9 +47,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       .order('id', { ascending: false });
 
     if (!error && data) {
-      // Tarihi geçmiş aktif etkinlikleri otomatik olarak arşive (is_active: false) aktar
+      // Tarihi geçmiş veya 1 saat kuralı gereği kapanması gereken etkinlikleri işle
       const processedEvents = await Promise.all(
         data.map(async (ev: any) => {
+          // 1. Tarihi geçmiş aktif etkinlikleri otomatik olarak arşive (is_active: false) aktar
           if (ev.is_active && isEventPast(ev.event_date)) {
             await supabase
               .from('etkinlik_ayarlari')
@@ -57,6 +58,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               .eq('id', ev.id);
             return { ...ev, is_active: false, is_registration_open: false };
           }
+
+          // 2. 1 saatten az kalmış ve yönetici tarafından manuel açılmamışsa, kayıtları otomatik sadece bilet hazırlamaya çek
+          if (ev.is_active && ev.is_registration_open && shouldAutoCloseRegistration(ev)) {
+            await supabase
+              .from('etkinlik_ayarlari')
+              .update({ is_registration_open: false })
+              .eq('id', ev.id);
+            return { ...ev, is_registration_open: false };
+          }
+
           return ev;
         })
       );

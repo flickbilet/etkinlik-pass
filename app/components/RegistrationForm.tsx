@@ -3,10 +3,11 @@ import { useState, useEffect } from 'react';
 import { 
   Loader2, Film, Theater, Users, Trophy, 
   CalendarDays, MapPin, ChevronRight, ArrowLeft, Ticket, 
-  User, Smartphone, Search, Presentation, AlertCircle, Sparkles, CalendarX2, ExternalLink, Vote, HelpCircle
+  User, Smartphone, Search, Presentation, AlertCircle, Sparkles, CalendarX2, ExternalLink, Vote, HelpCircle,
+  Clock
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { formatEventDateDisplay, unpackEventLocation } from '@/lib/dateUtils';
+import { formatEventDateDisplay, unpackEventLocation, shouldAutoCloseRegistration } from '@/lib/dateUtils';
 import SurveyWidget from './SurveyWidget';
 
 const EVENT_ICONS: Record<string, React.ElementType> = {
@@ -208,7 +209,7 @@ export default function RegistrationForm({
                     }
 
                     const isFeatured = !!event.is_featured;
-                    const isRegClosed = event.is_registration_open === false;
+                    const isRegClosed = event.is_registration_open === false || shouldAutoCloseRegistration(event);
                     const { locationName, locationUrl } = unpackEventLocation(event);
 
                     return (
@@ -240,8 +241,8 @@ export default function RegistrationForm({
                                 {EVENT_TYPE_LABELS[event.event_type] || event.event_type}
                               </span>
                               {isRegClosed && (
-                                <span className="text-[8px] font-black uppercase tracking-wider bg-rose-500/15 text-rose-400 border border-rose-500/30 px-2 py-0.5 rounded-md">
-                                  SADECE BİLET SORGULAMA
+                                <span className="text-[8px] font-black uppercase tracking-wider bg-rose-500/15 text-rose-400 border border-rose-500/30 px-2 py-0.5 rounded-md flex items-center gap-1">
+                                  <Clock size={10} /> SADECE BİLET SORGULAMA
                                 </span>
                               )}
                             </div>

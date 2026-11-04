@@ -13,9 +13,10 @@ import {
   GraduationCap, UserCheck2, Copy, FileUp, Loader2, Film, Theater, 
   Trophy, Calendar, MapPin, Link2, Sparkles, Power, User, CreditCard, 
   Banknote, LayoutGrid, Download, Archive, ArchiveRestore, UserCheck,
-  ShieldAlert, Ban, FileQuestion, HelpCircle, ListPlus, AlignLeft, Plus
+  ShieldAlert, Ban, FileQuestion, HelpCircle, ListPlus, AlignLeft, Plus,
+  SwitchCamera, ZoomIn
 } from 'lucide-react';
-import { buildEventDateTime, splitEventDateTime, formatEventDateDisplay, isEventPast, packEventLocation, unpackEventLocation } from '@/lib/dateUtils';
+import { buildEventDateTime, splitEventDateTime, formatEventDateDisplay, isEventPast, packEventLocation, unpackEventLocation, isEventWithinOneHour, shouldAutoCloseRegistration } from '@/lib/dateUtils';
 
 type TabType = 'list' | 'pending' | 'banned' | 'add' | 'scanner' | 'settings';
 
@@ -85,6 +86,10 @@ function EventManagementContent() {
   const [isInitializingScanner, setIsInitializingScanner] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const scanStatusRef = useRef(scanStatus.status);
+  const [availableCameras, setAvailableCameras] = useState<any[]>([]);
+  const [currentCameraId, setCurrentCameraId] = useState<string | null>(null);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [hasZoomSupport, setHasZoomSupport] = useState<boolean>(false);
 
   // --- SEKME 5: AYARLAR & KOLTUK DÜZENLEYİCİ STATE'LERİ ---
   const [savingSettings, setSavingSettings] = useState(false);
@@ -252,31 +257,40 @@ function EventManagementContent() {
 
   // --- QR SCANNER YÖNETİMİ ---
   const safeStopScanner = async () => {
-    if (scannerRef.current && scannerRef.current.isScanning) {
+    if (scannerRef.current) {
       try {
-        await scannerRef.current.stop();
-        scannerRef.current = null;
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop();
+        }
+        scannerRef.current.clear();
       } catch (err) {
         console.error("Scanner durdurulamadı:", err);
+      } finally {
+        scannerRef.current = null;
       }
     }
   };
 
-  useEffect(() => {
-    if (!isAuthenticated || activeTab !== 'scanner' || !event) {
-      safeStopScanner();
-      return;
+  const handleSetZoom = async (newZoom: number) => {
+    if (!scannerRef.current || !scannerRef.current.isScanning) return;
+    try {
+      await scannerRef.current.applyVideoConstraints({
+        advanced: [{ zoom: newZoom } as any],
+      });
+      setZoomLevel(newZoom);
+    } catch (e) {
+      console.warn("Zoom uygulanamadı:", e);
     }
+  };
 
-    let isMounted = true;
-
-    const startCamera = async () => {
+  const startScanner = useCallback(
+    async (targetCameraId?: string) => {
       try {
         setIsInitializingScanner(true);
         await safeStopScanner();
 
         const readerEl = document.getElementById("reader");
-        if (!readerEl || !isMounted) return;
+        if (!readerEl) return;
 
         const html5QrCode = new Html5Qrcode("reader", {
           formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
@@ -293,35 +307,87 @@ function EventManagementContent() {
           },
         };
 
-        let cameraConfig: any = { facingMode: "environment" };
-
+        // 1. Kamera listesini al (iOS Safari'de etiketleri tetiklemek için izin kontrolü)
+        let devices: any[] = [];
         try {
-          const devices = await Html5Qrcode.getCameras();
-          if (devices && devices.length > 0) {
-            const mainCamera = devices.find((d) => {
-              const lbl = d.label.toLowerCase();
-              return (
-                (lbl.includes('back') || lbl.includes('arka') || lbl.includes('rear')) &&
-                !lbl.includes('ultra') &&
-                !lbl.includes('0.5') &&
-                !lbl.includes('wide-angle')
-              );
-            });
-
-            if (mainCamera) {
-              cameraConfig = mainCamera.id;
-            } else if (devices.length > 1) {
-              cameraConfig = devices[devices.length - 2].id;
-            } else {
-              cameraConfig = devices[0].id;
+          devices = await Html5Qrcode.getCameras();
+          if (
+            devices &&
+            devices.length > 0 &&
+            devices.every((d: any) => !d.label) &&
+            typeof navigator !== 'undefined' &&
+            navigator.mediaDevices?.getUserMedia
+          ) {
+            try {
+              const pingStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+              pingStream.getTracks().forEach((t) => t.stop());
+              devices = await Html5Qrcode.getCameras();
+            } catch (permErr) {
+              console.warn("Kamera izin kontrolü:", permErr);
             }
           }
-        } catch (e) {
-          console.warn("Kamera listesi alınamadı, facingMode kullanılacak:", e);
+        } catch (camErr) {
+          console.warn("Kamera listesi alınamadı:", camErr);
         }
 
+        // Cihazları kullanıcı dostu adlandır ve tiplerini belirle
+        const formatted = (devices || []).map((d: any, idx: number) => {
+          const lbl = (d.label || '').toLowerCase();
+          const isFront = lbl.includes('front') || lbl.includes('ön') || lbl.includes('user') || lbl.includes('facetime');
+          const isUltra = lbl.includes('ultra') || lbl.includes('0.5') || lbl.includes('super wide') || lbl.includes('ultrawide');
+          const isTele = lbl.includes('tele') || lbl.includes('zoom') || lbl.includes('3x') || lbl.includes('5x');
+
+          let friendlyName = d.label || `Kamera ${idx + 1}`;
+          if (isFront) {
+            friendlyName = 'Ön Kamera';
+          } else if (isUltra) {
+            friendlyName = 'Geniş Açı (0.5x)';
+          } else if (isTele) {
+            friendlyName = 'Telefoto (Zoom)';
+          } else if (lbl.includes('back') || lbl.includes('arka') || lbl.includes('rear') || lbl.includes('wide') || lbl.includes('camera')) {
+            friendlyName = 'Ana Kamera (1x - Standart)';
+          }
+
+          return {
+            id: d.id,
+            rawLabel: d.label,
+            friendlyName,
+            isBack: !isFront,
+            isUltra,
+            isTele,
+          };
+        });
+
+        setAvailableCameras(formatted);
+
+        // 2. Kamera Seçimi: iPhone 0.5x Ultra-Wide tuzağından kaçın
+        let chosenId: string | null = targetCameraId || currentCameraId;
+
+        if (!chosenId || !formatted.some((d) => d.id === chosenId)) {
+          // Öncelik 1: Ultra-wide ve Telephoto OLMAYAN arka kamera (Standart 1x Ana Kamera)
+          const main1x = formatted.find((d) => d.isBack && !d.isUltra && !d.isTele);
+          if (main1x) {
+            chosenId = main1x.id;
+          } else {
+            // Öncelik 2: Ultra-wide olmayan herhangi bir arka kamera
+            const nonUltra = formatted.find((d) => d.isBack && !d.isUltra);
+            if (nonUltra) {
+              chosenId = nonUltra.id;
+            } else if (formatted.length > 0) {
+              const anyBack = formatted.find((d) => d.isBack);
+              chosenId = anyBack ? anyBack.id : formatted[0].id;
+            }
+          }
+        }
+
+        if (chosenId) {
+          setCurrentCameraId(chosenId);
+        }
+
+        const cameraConfig = chosenId ? chosenId : { facingMode: "environment" };
+
         const idsToMatch = [eventId];
-        if (event.slot_id && Number(event.slot_id) !== eventId) {
+        if (event?.slot_id && Number(event.slot_id) !== eventId) {
           idsToMatch.push(Number(event.slot_id));
         }
 
@@ -385,24 +451,60 @@ function EventManagementContent() {
             }
 
             setTimeout(() => {
-              if (isMounted) setScanStatus({ status: 'idle', message: '' });
+              setScanStatus({ status: 'idle', message: '' });
             }, 2000);
           },
           () => {}
         );
-        if (isMounted) setIsInitializingScanner(false);
+
+        // 3. Zoom ve odak kontrolü (ultra-wide başlatılmışsa 1.0x seviyesine sabitle)
+        try {
+          const trackCaps: any = html5QrCode.getRunningTrackCapabilities();
+          if (trackCaps && trackCaps.zoom) {
+            setHasZoomSupport(true);
+            const minZ = trackCaps.zoom.min || 1;
+            const maxZ = trackCaps.zoom.max || 1;
+            const initZ = Math.min(Math.max(1.0, minZ), maxZ);
+            setZoomLevel(initZ);
+            if (initZ > minZ) {
+              await html5QrCode.applyVideoConstraints({
+                advanced: [{ zoom: initZ } as any],
+              });
+            }
+          } else {
+            setHasZoomSupport(false);
+          }
+        } catch (zErr) {
+          console.warn("Zoom ayarlanamadı:", zErr);
+        }
+
+        setIsInitializingScanner(false);
       } catch (err) {
         console.error("Kamera başlatılamadı:", err);
-        if (isMounted) setIsInitializingScanner(false);
+        setIsInitializingScanner(false);
       }
-    };
+    },
+    [eventId, event?.slot_id, currentCameraId]
+  );
 
-    startCamera();
+  const handleSwitchCamera = async (newCameraId: string) => {
+    if (newCameraId === currentCameraId) return;
+    setCurrentCameraId(newCameraId);
+    await startScanner(newCameraId);
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated || activeTab !== 'scanner' || !event) {
+      safeStopScanner();
+      return;
+    }
+
+    startScanner();
+
     return () => {
-      isMounted = false;
       safeStopScanner();
     };
-  }, [activeTab, isAuthenticated, event?.id]);
+  }, [activeTab, isAuthenticated, event?.id, startScanner]);
 
   // --- KATILIMCI İŞLEMLERİ ---
   const bannedParticipants = participants.filter((p) => p.is_banned === true);
@@ -930,7 +1032,24 @@ function EventManagementContent() {
     const finalIsActive = expired ? false : event.is_active;
     const finalIsRegOpen = expired ? false : event.is_registration_open;
 
-    const updatePayload = {
+    const isWithin1H = isEventWithinOneHour(isoDateTime);
+    let isManualOverride = false;
+    if (finalIsRegOpen && isWithin1H) {
+      isManualOverride = true;
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(`manual_reg_opened_${event.id}`, 'true');
+        } catch {}
+      }
+    } else if (!finalIsRegOpen) {
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem(`manual_reg_opened_${event.id}`);
+        } catch {}
+      }
+    }
+
+    const updatePayload: any = {
       event_name: event.event_name,
       event_date: isoDateTime,
       event_location: packEventLocation(event.event_location, event.location_url),
@@ -943,7 +1062,9 @@ function EventManagementContent() {
       event_iban: event.is_paid ? event.event_iban : null,
       event_ibanname: event.is_paid ? event.event_ibanname : null,
       is_registration_open: finalIsRegOpen,
+      registration_manually_opened: isManualOverride,
       is_featured: event.is_featured,
+      updated_at: new Date().toISOString(),
     };
 
     let { error } = await supabase
@@ -954,8 +1075,17 @@ function EventManagementContent() {
       })
       .eq('id', event.id);
 
+    if (error && (error.message?.includes('registration_manually_opened') || error.code === 'PGRST204')) {
+      delete updatePayload.registration_manually_opened;
+      const retry = await supabase.from('etkinlik_ayarlari').update({
+        ...updatePayload,
+        custom_questions: customQuestions,
+      }).eq('id', event.id);
+      error = retry.error;
+    }
+
     if (error && (error.message?.includes('custom_questions') || error.code === 'PGRST204')) {
-      alert("Bilgi:\n\n'etkinlik_ayarlari' tablosunda 'custom_questions' sütunu henüz eklenmemiş.\nSoruların kaydedilebilmesi için lütfen Supabase SQL Editöründe şu komutu çalıştırın:\n\nALTER TABLE public.etkinlik_ayarlari ADD COLUMN IF NOT EXISTS custom_questions JSONB DEFAULT '[]'::jsonb;");
+      delete updatePayload.custom_questions;
       const retry = await supabase.from('etkinlik_ayarlari').update(updatePayload).eq('id', event.id);
       error = retry.error;
     }
@@ -989,12 +1119,45 @@ function EventManagementContent() {
       setActiveTab('settings');
       return;
     }
-    const updated = { ...event, [field]: value };
+
+    const payload: any = { 
+      [field]: value,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (field === 'is_registration_open') {
+      const isWithin1H = isEventWithinOneHour(event.event_date);
+      if (value === true && isWithin1H) {
+        payload.registration_manually_opened = true;
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem(`manual_reg_opened_${event.id}`, 'true');
+          } catch {}
+        }
+      } else if (value === false) {
+        payload.registration_manually_opened = false;
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem(`manual_reg_opened_${event.id}`);
+          } catch {}
+        }
+      }
+    }
+
+    const updated = { ...event, ...payload };
     setEvent(updated);
-    const { error } = await supabase
+
+    let { error } = await supabase
       .from('etkinlik_ayarlari')
-      .update({ [field]: value })
+      .update(payload)
       .eq('id', event.id);
+
+    if (error && (error.message?.includes('registration_manually_opened') || error.code === 'PGRST204')) {
+      delete payload.registration_manually_opened;
+      const retry = await supabase.from('etkinlik_ayarlari').update(payload).eq('id', event.id);
+      error = retry.error;
+    }
+
     if (!error) fetchEvents();
   };
 
@@ -1390,7 +1553,11 @@ function EventManagementContent() {
               }`}
             >
               <User size={14} />
-              {event.is_registration_open ? 'Kayıtlar Açık' : 'Kayıtlar Kapalı'}
+              {event.is_registration_open ? (
+                isEventWithinOneHour(event.event_date) ? 'Kayıtlar Açık (Manuel)' : 'Kayıtlar Açık'
+              ) : (
+                isEventWithinOneHour(event.event_date) ? 'Kayıtlar Kapalı (1 Saatten Az)' : 'Kayıtlar Kapalı'
+              )}
             </button>
 
             <button
@@ -2313,6 +2480,55 @@ function EventManagementContent() {
             )}
           </div>
 
+          {/* KAMERA DEĞİŞTİRİCİ VE ZOOM KONTROLLERİ */}
+          {(availableCameras.length > 1 || hasZoomSupport) && (
+            <div className="bg-slate-900/70 border border-white/10 p-3.5 rounded-[2rem] space-y-2.5 shadow-lg">
+              {availableCameras.length > 1 && (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-300 shrink-0">
+                    <SwitchCamera size={16} className="text-blue-400" />
+                    <span>Kamera:</span>
+                  </div>
+                  <select
+                    value={currentCameraId || ''}
+                    onChange={(e) => handleSwitchCamera(e.target.value)}
+                    className="flex-1 bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none focus:border-blue-500 cursor-pointer truncate"
+                  >
+                    {availableCameras.map((cam) => (
+                      <option key={cam.id} value={cam.id}>
+                        {cam.friendlyName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {hasZoomSupport && (
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/5">
+                  <span className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-1">
+                    <ZoomIn size={13} className="text-blue-400" /> Yakınlaştırma (Zoom):
+                  </span>
+                  <div className="flex gap-1.5">
+                    {[1, 1.5, 2].map((z) => (
+                      <button
+                        key={z}
+                        type="button"
+                        onClick={() => handleSetZoom(z)}
+                        className={`px-3 py-1 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                          zoomLevel === z
+                            ? 'bg-blue-600 text-white shadow-md'
+                            : 'bg-slate-950 text-slate-400 hover:text-white border border-white/5'
+                        }`}
+                      >
+                        {z}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-slate-900/50 border border-white/5 p-6 rounded-[2.5rem] flex flex-col items-center">
               <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-2">İçeride</span>
@@ -2561,7 +2777,11 @@ function EventManagementContent() {
                     : 'bg-slate-950 border-white/5 text-slate-500'
                 }`}
               >
-                <User size={14} /> {event.is_registration_open ? 'Kayıt Açık' : 'Kayıt Kapalı'}
+                <User size={14} /> {event.is_registration_open ? (
+                  isEventWithinOneHour(event.event_date) ? 'Kayıt Açık (Manuel)' : 'Kayıt Açık'
+                ) : (
+                  isEventWithinOneHour(event.event_date) ? 'Kayıt Kapalı (1 Saatten Az)' : 'Kayıt Kapalı'
+                )}
               </button>
 
               <button

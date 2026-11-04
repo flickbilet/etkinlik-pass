@@ -4,8 +4,9 @@ import { supabase } from '@/lib/supabase';
 import { 
   User, Smartphone, Mail, School, Users, 
   MessageCircle, CheckCircle2, Loader2, Image as ImageIcon, ShieldCheck, KeyRound, Copy, CreditCard,
-  ChevronDown, AlertCircle, Info, ArrowDownRight, FileQuestion
+  ChevronDown, AlertCircle, Info, ArrowDownRight, FileQuestion, Clock
 } from 'lucide-react';
+import { isEventWithinOneHour, shouldAutoCloseRegistration } from '@/lib/dateUtils';
 
 export default function NewRegistration({ 
   onSuccess, 
@@ -47,15 +48,26 @@ export default function NewRegistration({
       try {
         let { data, error } = await supabase
           .from('etkinlik_ayarlari')
-          .select('id, slot_id, event_price, event_iban, event_ibanname, is_paid, is_registration_open, custom_questions')
+          .select('id, slot_id, event_date, updated_at, is_active, event_price, event_iban, event_ibanname, is_paid, is_registration_open, registration_manually_opened, custom_questions')
           .eq('id', selectedEventId)
           .single();
+
+        // Eğer registration_manually_opened kolonu henüz eklenmemişse o kolon olmadan tekrar çek
+        if (error && (error.message?.includes('registration_manually_opened') || error.code === 'PGRST204')) {
+          const fallbackRes = await supabase
+            .from('etkinlik_ayarlari')
+            .select('id, slot_id, event_date, updated_at, is_active, event_price, event_iban, event_ibanname, is_paid, is_registration_open, custom_questions')
+            .eq('id', selectedEventId)
+            .single();
+          data = fallbackRes.data;
+          error = fallbackRes.error;
+        }
 
         // Eğer custom_questions kolonu henüz eklenmemişse hata almadan eski kolonlarla tekrar çek
         if (error && (error.message?.includes('custom_questions') || error.code === 'PGRST204')) {
           const fallbackRes = await supabase
             .from('etkinlik_ayarlari')
-            .select('id, slot_id, event_price, event_iban, event_ibanname, is_paid, is_registration_open')
+            .select('id, slot_id, event_date, updated_at, is_active, event_price, event_iban, event_ibanname, is_paid, is_registration_open')
             .eq('id', selectedEventId)
             .single();
           data = fallbackRes.data;
@@ -150,6 +162,13 @@ export default function NewRegistration({
     const cleanAdSoyad = formData.ad_soyad.trim();
     const cleanEmail = formData.email.trim();
     const cleanTelefon = formData.telefon.trim();
+
+    const isRegClosed = eventSettings && (
+      eventSettings.is_registration_open === false || shouldAutoCloseRegistration(eventSettings)
+    );
+    if (isRegClosed) {
+      return setErrorMessage("Bu etkinlik için yeni kayıt alımı sona ermiştir. Yalnızca bilet hazırlama işlemi yapılabilir.");
+    }
 
     if (!emailVerified) return setErrorMessage("Lütfen önce e-posta adresinizi doğrulayın!");
     if (!waJoined || countdown > 0) return setErrorMessage("Lütfen önce WhatsApp grubuna katılın!");
@@ -349,18 +368,25 @@ export default function NewRegistration({
     );
   }
 
-  if (eventSettings && eventSettings.is_registration_open === false) {
+  const isRegClosed = eventSettings && (
+    eventSettings.is_registration_open === false || shouldAutoCloseRegistration(eventSettings)
+  );
+
+  if (isRegClosed) {
+    const is1H = isEventWithinOneHour(eventSettings?.event_date);
     return (
       <div className="bg-slate-900/60 backdrop-blur-2xl border border-white/10 p-10 rounded-[2.5rem] shadow-2xl flex flex-col items-center justify-center text-center space-y-6 animate-in fade-in zoom-in duration-500">
-        <div className="bg-red-500/20 p-5 rounded-full border border-red-500/30">
-          <AlertCircle size={48} className="text-red-500" />
+        <div className="bg-rose-500/20 p-5 rounded-full border border-rose-500/30">
+          <Clock size={48} className="text-rose-500" />
         </div>
         <div className="space-y-2">
           <h2 className="text-2xl font-bold text-white tracking-tighter uppercase">
-            Kontenjanımız Doldu ☹️
+            {is1H ? 'Kayıtlar Sona Erdi' : 'Kontenjanımız Doldu ☹️'}
           </h2>
-          <p className="text-slate-400 text-sm leading-relaxed max-w-[280px]">
-            Bu etkinlik için kayıtlar şu an kapalıdır. İlginiz için teşekkür ederiz!
+          <p className="text-slate-400 text-sm leading-relaxed max-w-[320px]">
+            {is1H
+              ? 'Etkinlik saatine 1 saatten az kaldığı için yeni kayıt alımı kapanmıştır. Daha önce onaylanan kaydınız varsa ana sayfadan "Biletini Hazırla" adımından biletinizi alabilirsiniz.'
+              : 'Bu etkinlik için kayıtlar şu an kapalıdır. İlginiz için teşekkür ederiz!'}
           </p>
         </div>
       </div>

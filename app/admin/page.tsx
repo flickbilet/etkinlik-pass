@@ -11,7 +11,7 @@ import {
   Loader2, X, Power, RefreshCcw, FolderKanban, AlertCircle, ExternalLink, ShieldAlert,
   FileQuestion
 } from 'lucide-react';
-import { buildEventDateTime, formatEventDateDisplay, isEventPast, packEventLocation, unpackEventLocation } from '@/lib/dateUtils';
+import { buildEventDateTime, formatEventDateDisplay, isEventPast, packEventLocation, unpackEventLocation, isEventWithinOneHour, shouldAutoCloseRegistration } from '@/lib/dateUtils';
 
 const EVENT_TYPE_META: Record<string, { label: string; icon: any }> = {
   cinema: { label: 'Sinema', icon: Film },
@@ -298,10 +298,46 @@ export default function AdminDashboardPage() {
 
   const toggleRegistrationOpen = async (ev: any) => {
     setActionLoadingId(ev.id);
-    const { error } = await supabase
+    const nextOpen = !ev.is_registration_open;
+    const isWithin1H = isEventWithinOneHour(ev.event_date);
+
+    const payload: any = {
+      is_registration_open: nextOpen,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (nextOpen && isWithin1H) {
+      // 1 saatten az kala yönetici manuel olarak açtı
+      payload.registration_manually_opened = true;
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(`manual_reg_opened_${ev.id}`, 'true');
+        } catch {}
+      }
+    } else if (!nextOpen) {
+      // Yönetici manuel kapattı
+      payload.registration_manually_opened = false;
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem(`manual_reg_opened_${ev.id}`);
+        } catch {}
+      }
+    }
+
+    let { error } = await supabase
       .from('etkinlik_ayarlari')
-      .update({ is_registration_open: !ev.is_registration_open })
+      .update(payload)
       .eq('id', ev.id);
+
+    // Eğer registration_manually_opened sütunu henüz DB'de yoksa hata almadan retry yap
+    if (error && (error.message?.includes('registration_manually_opened') || error.code === 'PGRST204')) {
+      delete payload.registration_manually_opened;
+      const retry = await supabase
+        .from('etkinlik_ayarlari')
+        .update(payload)
+        .eq('id', ev.id);
+      error = retry.error;
+    }
 
     if (error) {
       alert("Hata: " + error.message);
@@ -350,8 +386,27 @@ export default function AdminDashboardPage() {
     );
   });
 
-  const totalApprovedAll = Object.values(statsByEvent).reduce((acc, s) => acc + s.approved, 0);
-  const totalPendingAll = Object.values(statsByEvent).reduce((acc, s) => acc + s.pending, 0);
+  // İstatistikleri sekme bazında hesapla: Aktif sekmesindeyken geçmiş etkinlikler ASLA dahil edilmez
+  const totalApprovedActive = activeEvents.reduce(
+    (acc: number, ev: any) => acc + (statsByEvent[Number(ev.id)]?.approved || 0),
+    0
+  );
+  const totalPendingActive = activeEvents.reduce(
+    (acc: number, ev: any) => acc + (statsByEvent[Number(ev.id)]?.pending || 0),
+    0
+  );
+
+  const totalApprovedArchived = archivedEvents.reduce(
+    (acc: number, ev: any) => acc + (statsByEvent[Number(ev.id)]?.approved || 0),
+    0
+  );
+  const totalPendingArchived = archivedEvents.reduce(
+    (acc: number, ev: any) => acc + (statsByEvent[Number(ev.id)]?.pending || 0),
+    0
+  );
+
+  const displayedApproved = activeTab === 'active' ? totalApprovedActive : totalApprovedArchived;
+  const displayedPending = activeTab === 'active' ? totalPendingActive : totalPendingArchived;
 
   return (
     <div className="space-y-8 pb-20">
@@ -849,8 +904,10 @@ export default function AdminDashboardPage() {
 
         <div className="bg-slate-900/50 border border-white/5 p-5 rounded-[2rem] flex items-center justify-between">
           <div>
-            <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 block mb-1">Toplam Onaylı</span>
-            <span className="text-3xl font-black text-white">{loadingStats ? '...' : totalApprovedAll}</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 block mb-1">
+              {activeTab === 'active' ? 'Toplam Onaylı' : 'Arşiv Onaylı'}
+            </span>
+            <span className="text-3xl font-black text-white">{loadingStats ? '...' : displayedApproved}</span>
           </div>
           <div className="bg-emerald-500/10 text-emerald-400 p-3.5 rounded-2xl">
             <Users size={24} />
@@ -858,13 +915,15 @@ export default function AdminDashboardPage() {
         </div>
 
         <div className={`border p-5 rounded-[2rem] flex items-center justify-between transition-all ${
-          totalPendingAll > 0
+          displayedPending > 0
             ? 'bg-amber-500/10 border-amber-500/30'
             : 'bg-slate-900/50 border-white/5'
         }`}>
           <div>
-            <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 block mb-1">Onay Bekleyen</span>
-            <span className="text-3xl font-black text-white">{loadingStats ? '...' : totalPendingAll}</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 block mb-1">
+              {activeTab === 'active' ? 'Onay Bekleyen' : 'Arşiv Bekleyen'}
+            </span>
+            <span className="text-3xl font-black text-white">{loadingStats ? '...' : displayedPending}</span>
           </div>
           <div className="bg-amber-500/20 text-amber-400 p-3.5 rounded-2xl">
             <Clock size={24} />
@@ -995,13 +1054,38 @@ export default function AdminDashboardPage() {
                         </span>
                       )}
 
-                      <span className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase border ${
-                        ev.is_registration_open
-                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                          : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                      }`}>
-                        {ev.is_registration_open ? 'Kayıt Açık' : 'Kayıt Kapalı'}
-                      </span>
+                      {(() => {
+                        const is1H = isEventWithinOneHour(ev.event_date);
+                        return (
+                          <span
+                            className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase border flex items-center gap-1 ${
+                              ev.is_registration_open
+                                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                                : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                            }`}
+                          >
+                            {ev.is_registration_open ? (
+                              is1H ? (
+                                <>
+                                  <Clock size={11} className="text-amber-400" />
+                                  <span>Kayıt Açık (Manuel)</span>
+                                </>
+                              ) : (
+                                'Kayıt Açık'
+                              )
+                            ) : (
+                              is1H ? (
+                                <>
+                                  <Clock size={11} className="text-rose-400" />
+                                  <span>Kayıt Kapalı (1 Saatten Az)</span>
+                                </>
+                              ) : (
+                                'Kayıt Kapalı'
+                              )
+                            )}
+                          </span>
+                        );
+                      })()}
 
                       <span className="px-3 py-1 rounded-xl text-[10px] font-black uppercase bg-slate-800 text-slate-300">
                         {ev.has_seating ? 'Koltuklu' : 'Koltuksuz'}
